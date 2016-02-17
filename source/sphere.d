@@ -7,11 +7,11 @@ import derelict.glfw3.glfw3;
 
 class Sphere
 {
-    private GLfloat[3] topVertex;
-    private GLfloat[3] bottomVertex;
+    private GLfloat[4] topVertex;
+    private GLfloat[4] bottomVertex;
     private GLfloat[][][] otherVertices;
 
-    private GLfloat[3] center;
+    private GLfloat[4] center;
     private GLfloat radius;
     private int rings;
     private int sectors;
@@ -21,13 +21,12 @@ class Sphere
         this.center[0] = centerX;
         this.center[1] = centerY;
         this.center[2] = centerZ;
+        this.center[3] = 1.0;
         this.radius = radiusArg;
         this.rings = ringsArg;
         this.sectors = sectorsArg;
 
-        this.otherVertices = new GLfloat[][][](rings, sectors, 3);
-
-        writeln(this.otherVertices);
+        this.otherVertices = new GLfloat[][][](rings, sectors, 4);
 
         this.generateVertices();
     }
@@ -49,31 +48,83 @@ class Sphere
             for (int sector = 0; sector < this.sectors; sector++)
             {
                 phi += phiStep;
-                GLfloat[3] coordinates = this.getCoordinate(theta, phi);
-                writeln(coordinates);
+                GLfloat[4] coordinates = this.getCoordinate(theta, phi);
                 this.otherVertices[ring][sector][0] = coordinates[0];
                 this.otherVertices[ring][sector][1] = coordinates[1];
                 this.otherVertices[ring][sector][2] = coordinates[2];
+                this.otherVertices[ring][sector][3] = coordinates[3];
             }
         }
 
         this.bottomVertex = this.getCoordinate(-PI/2, 0);
     }
 
-    private GLfloat[3] getCoordinate(GLfloat theta, GLfloat phi)
+    private GLfloat[4] getCoordinate(GLfloat theta, GLfloat phi)
     {
-        GLfloat[3] result =
+        GLfloat[4] result =
         [
             this.radius * sin(theta) * cos(phi),
             this.radius * sin(theta) * sin(phi),
-            this.radius * cos(theta)
+            this.radius * cos(theta),
+            1.0
         ];
 
         return result;
     }
 
-    public void drawSphere()
+    public GLfloat[] getVertexArray()
     {
+        GLfloat[] vertexArray;
+        GLfloat[] one = [1.0];
 
+        //top ring
+        for (int sector = 0; sector < this.sectors; sector++)
+        {
+            vertexArray ~= this.topVertex;
+            vertexArray ~= this.otherVertices[0][sector];
+            vertexArray ~= this.otherVertices[0][(sector+1) % sectors];
+        }
+
+        if (rings > 1)
+        {
+            for (int ring = 0; ring < this.rings-1; ring++)
+            {
+                for(int sector = 0; sector < this.sectors; sector++)
+                {
+                    vertexArray ~= this.otherVertices[ring][sector];
+                    vertexArray ~= this.otherVertices[ring][(sector+1)%sectors];
+                    vertexArray ~= this.otherVertices[ring+1][sector];
+
+                    vertexArray ~= this.otherVertices[ring][(sector+1)%sectors];
+                    vertexArray ~= this.otherVertices[ring+1][(sector+1)%sectors];
+                    vertexArray ~= this.otherVertices[ring+1][sector];
+                }
+            }
+        }
+
+        //bottom ring
+        for (int sector = 0; sector < this.sectors; sector++)
+        {
+            vertexArray ~= this.bottomVertex;
+            vertexArray ~= this.otherVertices[this.rings-1][sector];
+            vertexArray ~= this.otherVertices[this.rings-1][(sector+1) % sectors];
+        }
+
+        return vertexArray;
+    }
+
+    public GLfloat[] getColorArray()
+    {
+        GLfloat[] colorArray = new GLfloat[](getVertexArray().length);
+        for(int i = 0; i < colorArray.length; i++)
+        {
+            if (i % 4 == 1)
+            {
+                colorArray[i] = 0.0;
+                continue;
+            }
+            colorArray[i] = 1.0;
+        }
+        return colorArray;
     }
 }

@@ -51,28 +51,6 @@ GLfloat[] colorAxis = [
   0.0, 0.0, 1.0, 1.0,
   0.0, 0.0, 1.0, 1.0];
 
-// Data for triangle 1
-GLfloat[] vertices1 = [
- -3.0, -1.0, -5.0, 1.0,
- -1.0, -1.0, -5.0, 1.0,
- -2.0,  1.0, -5.0, 1.0];
- 
-GLfloat[] colors1 = [
-  0.0, 1.0, 0.0, 1.0,
-  1.0, 0.0, 0.0, 1.0,
-  0.0, 0.0, 1.0, 1.0];
-
-// Data for triangle 2
-GLfloat[] vertices2 = [
-  1.0, -1.0, -5.0, 1.0,
-  3.0, -1.0, -5.0, 1.0,
-  2.0,  1.0, -5.0, 1.0];
-
-GLfloat[] colors2 = [
-  0.0, 0.0, 1.0, 1.0,
-  0.0, 1.0, 0.0, 1.0,
-  1.0, 0.0, 0.0, 1.0];
-
 bool wIsDown = false;
 bool aIsDown = false;
 bool sIsDown = false;
@@ -270,7 +248,26 @@ void main() {
 
   //////////////////////////////////////////////////////////////////////////////
   // Draw the spheres
-  Sphere sphere = new Sphere(0,0,0,2,5,10);
+  Sphere sphere = new Sphere(0,0,0,2,25,50);
+  GLfloat[] sphereVertices = sphere.getVertexArray();
+  GLfloat[] sphereColors = sphere.getColorArray();
+
+  //////////////////////////////////////////////////////////////////////////////
+    // VAO for the sphere
+    glBindVertexArray(vao[0]);
+    // Generate two slots for the vertex and color buffers
+    glGenBuffers(2, vbo.ptr);
+    // bind buffer for vertices and copy data into buffer
+    glBindBuffer(GL_ARRAY_BUFFER, vbo[0]);
+    glBufferData(GL_ARRAY_BUFFER, sphereVertices.length * GLfloat.sizeof, sphereVertices.ptr, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(vertexLoc);
+    glVertexAttribPointer(vertexLoc, vSize, GL_FLOAT, GL_FALSE, stride, null);
+    // bind buffer for colors and copy data into buffer
+    glBindBuffer(GL_ARRAY_BUFFER, vbo[1]);
+    glBufferData(GL_ARRAY_BUFFER, sphereColors.length * GLfloat.sizeof, sphereColors.ptr, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(colorLoc);
+    glVertexAttribPointer(colorLoc, cSize, GL_FLOAT, GL_FALSE, stride, cPointer);
+    glCheckError();
   
   //////////////////////////////////////////////////////////////////////////////
   // VAO for the Axis
@@ -335,10 +332,7 @@ void main() {
     setUniforms();
 
     glBindVertexArray(vao[0]);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-
-    glBindVertexArray(vao[1]);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glDrawArrays(GL_TRIANGLES, 0, cast(uint)sphereVertices.length);
 
     glBindVertexArray(vao[2]);
     glDrawArrays(GL_LINES, 0, 6);
@@ -362,7 +356,6 @@ void main() {
 
 extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
-    printf("Key=%d, scancode=%d, action=%d, mods=%d\n", key, scancode, action, mods);
 
     if ((action != 1 && action != 0) || (key != GLFW_KEY_W && key != GLFW_KEY_A && key != GLFW_KEY_S && key != GLFW_KEY_D))
     {
