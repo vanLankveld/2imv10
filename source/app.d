@@ -20,7 +20,10 @@ GLuint projMatrixLoc, viewMatrixLoc;
 GLfloat[MATRIX_SIZE] projMatrix;
 GLfloat[MATRIX_SIZE] viewMatrix;
 
-GLuint[3] vao;
+GLuint[100000] vao;
+
+GLuint[] sphereIndices;
+ulong sphereVertexCount;
 
 //Camera position
 GLfloat lookatX = 0;
@@ -241,37 +244,14 @@ void main() {
   glCheckError();
 
   GLuint[2] vbo;
-  glGenVertexArrays(3, vao.ptr);
+  glGenVertexArrays(2000, vao.ptr);
   GLint            vSize = 4, cSize = 3;
   GLsizei         stride = 4 * float.sizeof;
   const GLvoid* cPointer = null; //cast(void*)(? * GLfloat.sizeof);
 
   //////////////////////////////////////////////////////////////////////////////
-  // Draw the spheres
-  Sphere sphere = new Sphere(0,0,0,2,25,50);
-  GLfloat[] sphereVertices = sphere.getVertexArray();
-  GLfloat[] sphereColors = sphere.getColorArray();
-
-  //////////////////////////////////////////////////////////////////////////////
-    // VAO for the sphere
-    glBindVertexArray(vao[0]);
-    // Generate two slots for the vertex and color buffers
-    glGenBuffers(2, vbo.ptr);
-    // bind buffer for vertices and copy data into buffer
-    glBindBuffer(GL_ARRAY_BUFFER, vbo[0]);
-    glBufferData(GL_ARRAY_BUFFER, sphereVertices.length * GLfloat.sizeof, sphereVertices.ptr, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(vertexLoc);
-    glVertexAttribPointer(vertexLoc, vSize, GL_FLOAT, GL_FALSE, stride, null);
-    // bind buffer for colors and copy data into buffer
-    glBindBuffer(GL_ARRAY_BUFFER, vbo[1]);
-    glBufferData(GL_ARRAY_BUFFER, sphereColors.length * GLfloat.sizeof, sphereColors.ptr, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(colorLoc);
-    glVertexAttribPointer(colorLoc, cSize, GL_FLOAT, GL_FALSE, stride, cPointer);
-    glCheckError();
-  
-  //////////////////////////////////////////////////////////////////////////////
   // VAO for the Axis
-  glBindVertexArray(vao[2]);
+  glBindVertexArray(vao[0]);
   // Generate two slots for the vertex and color buffers
   glGenBuffers(2, vbo.ptr);
   // bind buffer for vertices and copy data into buffer
@@ -289,6 +269,35 @@ void main() {
   int width, height;
   glfwGetWindowSize(window, &width, &height);
   reshape(window, width, height);
+
+    GLfloat[] vertices;
+    GLfloat[] colors;
+    GLuint vaoIndex = 1;
+
+    int spheresX = 10;
+    int spheresY = 10;
+    int spheresZ = 10;
+
+    for (int i = 0; i < spheresX; i++)
+    {
+      GLfloat cX = 0.2 * i;
+      for (int j = 0; j < spheresY; j++)
+      {
+          GLfloat cY = 0.2 * j;
+          for (int k = 0; k < spheresZ; k++)
+          {
+              GLfloat cZ = 0.2 * k;
+              vertices = generateVertices([cX, cY, cZ, 1.0], 0.1, 4 , 8);
+              colors = generateColorArray(vertices);
+              prepareSphereBuffers(vertices, colors, vao[vaoIndex], vbo, vertexLoc, vSize,
+                                   stride,  colorLoc, cSize, cPointer);
+              glCheckError();
+              sphereIndices ~= [vaoIndex];
+              sphereVertexCount = vertices.length;
+              vaoIndex++;
+          }
+      }
+    }
 
   int i = 0, k = 1;
   uint frame = 0;
@@ -326,15 +335,20 @@ void main() {
     cameraX += movementVector[0];
     cameraZ += movementVector[1];
 
-
     setCamera(cameraX, cameraY, cameraZ, lookatX, lookatY, lookatZ);
     glUseProgram(shaderProgram);
     setUniforms();
 
-    glBindVertexArray(vao[0]);
-    glDrawArrays(GL_TRIANGLES, 0, cast(uint)sphereVertices.length);
+    //////////////////////////////////////////////////////////////////////////////
+    // Draw the spheres
 
-    glBindVertexArray(vao[2]);
+    for (int sphereIndex = 0; sphereIndex < sphereIndices.length; sphereIndex++)
+    {
+        GLuint vao = vao[sphereIndices[sphereIndex]];
+        drawSphere(vao, sphereVertexCount);
+    }
+
+    glBindVertexArray(vao[0]);
     glDrawArrays(GL_LINES, 0, 6);
 
     glfwSwapBuffers(window);
