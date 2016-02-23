@@ -67,7 +67,8 @@ void printProgramInfoLog(GLuint program) {
 
   if (infologLength > 0) {
     char[] infoLog;
-    glGetProgramInfoLog(program, infologLength, &charsWritten, infoLog.ptr);
+    //glGetProgramInfoLog(program, infologLength, &charsWritten, infoLog.ptr);
+    //Generates errors for Leo
     writeln(infoLog);
   } else {
     writeln("no program info log");
