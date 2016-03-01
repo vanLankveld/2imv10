@@ -15,7 +15,7 @@ import mfellner.math;
 bool fullscreen = false;
 
 GLuint vertexLoc, colorLoc, normalLoc;
-GLuint projMatrixLoc, viewMatrixLoc, lightIntensitiesLoc, lightPositionLoc;
+GLuint projMatrixLoc, viewMatrixLoc, lightIntensitiesLoc, lightPositionLoc, lightAmbientLoc;
 
 GLfloat[MATRIX_SIZE] projMatrix;
 GLfloat[MATRIX_SIZE] viewMatrix;
@@ -243,8 +243,9 @@ void main() {
 
   projMatrixLoc = glGetUniformLocation(shaderProgram, "projMatrix");
   viewMatrixLoc = glGetUniformLocation(shaderProgram, "viewMatrix");
-  lightPositionLoc = glGetUniformLocation(shaderProgram, "light.position");
-  lightIntensitiesLoc = glGetUniformLocation(shaderProgram, "light.intensities");
+  lightPositionLoc = glGetUniformLocation(shaderProgram, "lightPosition");
+  lightIntensitiesLoc = glGetUniformLocation(shaderProgram, "lightIntensities");
+  lightAmbientLoc = glGetUniformLocation(shaderProgram, "lightAmbient");
   glCheckError();
 
   GLuint[2] vbo;
@@ -280,9 +281,9 @@ void main() {
     GLfloat[] colors;
     GLuint vaoIndex = 1;
 
-    int spheresX = 10;
-    int spheresY = 10;
-    int spheresZ = 10;
+    int spheresX = 5;
+    int spheresY = 5;
+    int spheresZ = 5;
 
     writeln("build vertices for spheres");
 
@@ -295,7 +296,7 @@ void main() {
           for (int k = 0; k < spheresZ; k++)
           {
               GLfloat cZ = 0.2 * k;
-              GLfloat[][] sphereData = generateVerticesAndNormals([cX, cY, cZ, 1.0], 0.08, 3 , 6);
+              GLfloat[][] sphereData = generateVerticesAndNormals([cX, cY, cZ, 1.0], 0.08, 6 , 12);
               vertices = sphereData[0];
               normals = sphereData[1];
               colors = generateColorArray(vertices);
@@ -316,8 +317,10 @@ void main() {
   auto range = iota(-100, 100);
 
   GLfloat[VECTOR_SIZE] movementVector = [0,0,0];
+  glUseProgram(shaderProgram);
   glUniform3fv(cast(uint)lightPositionLoc, 1, cast(const(float)*)[cameraX, cameraY, cameraZ]);
-  glUniform3fv(cast(uint)lightIntensitiesLoc, 1, cast(const(float)*)[1,1,1]);
+  glUniform3fv(cast(uint)lightIntensitiesLoc, 1, cast(const(float)*)[1f,1f,1f]);
+  glUniform3fv(cast(uint)lightAmbientLoc, 1, cast(const(float)*)[0.1f,0.1f,0.1f]);
 
   while (!glfwWindowShouldClose(window)) {
     glClearColor(0.0, 0.0, 0.0, 1.0);
@@ -352,7 +355,6 @@ void main() {
     cameraZ += movementVector[1];
 
     setCamera(cameraX, cameraY, cameraZ, lookatX, lookatY, lookatZ);
-    glUseProgram(shaderProgram);
     setUniforms();
 
     //////////////////////////////////////////////////////////////////////////////
