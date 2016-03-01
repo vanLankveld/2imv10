@@ -14,13 +14,13 @@ import mfellner.math;
 
 bool fullscreen = false;
 
-GLuint vertexLoc, colorLoc;
-GLuint projMatrixLoc, viewMatrixLoc;
+GLuint vertexLoc, colorLoc, normalLoc;
+GLuint projMatrixLoc, viewMatrixLoc, lightIntensitiesLoc, lightPositionLoc, lightAmbientLoc;
 
 GLfloat[MATRIX_SIZE] projMatrix;
 GLfloat[MATRIX_SIZE] viewMatrix;
 
-GLuint[100000] vao;
+GLuint[1000000] vao;
 
 GLuint[] sphereIndices;
 ulong sphereVertexCount;
@@ -34,7 +34,7 @@ GLfloat cameraX = 4;
 GLfloat cameraY = 1;
 GLfloat cameraZ = 4;
 
-GLfloat walkStepSize = 0.1;
+GLfloat walkStepSize = 0.05;
 
 
 // Data for drawing Axis
@@ -223,6 +223,7 @@ void main() {
   writefln("GLSL:     %s\n", to!string(glGetString(GL_SHADING_LANGUAGE_VERSION)));
 
   glEnable(GL_DEPTH_TEST);
+  glEnable(GL_CULL_FACE);
 
   //////////////////////////////////////////////////////////////////////////////
   // Prepare shader program
@@ -237,14 +238,19 @@ void main() {
   printProgramInfoLog(shaderProgram);
 
   vertexLoc = glGetAttribLocation(shaderProgram,"position");
-  colorLoc = glGetAttribLocation(shaderProgram, "color"); 
+  colorLoc = glGetAttribLocation(shaderProgram, "color");
+  normalLoc = glGetAttribLocation(shaderProgram, "normal");
 
   projMatrixLoc = glGetUniformLocation(shaderProgram, "projMatrix");
   viewMatrixLoc = glGetUniformLocation(shaderProgram, "viewMatrix");
+  lightPositionLoc = glGetUniformLocation(shaderProgram, "lightPosition");
+  lightIntensitiesLoc = glGetUniformLocation(shaderProgram, "lightIntensities");
+  lightAmbientLoc = glGetUniformLocation(shaderProgram, "lightAmbient");
   glCheckError();
 
   GLuint[2] vbo;
-  glGenVertexArrays(2000, vao.ptr);
+  GLuint nbo;
+  glGenVertexArrays(1000000, vao.ptr);
   GLint            vSize = 4, cSize = 3;
   GLsizei         stride = 4 * float.sizeof;
   const GLvoid* cPointer = null; //cast(void*)(? * GLfloat.sizeof);
@@ -271,12 +277,15 @@ void main() {
   reshape(window, width, height);
 
     GLfloat[] vertices;
+    GLfloat[] normals;
     GLfloat[] colors;
     GLuint vaoIndex = 1;
 
-    int spheresX = 10;
-    int spheresY = 10;
-    int spheresZ = 10;
+    int spheresX = 5;
+    int spheresY = 5;
+    int spheresZ = 5;
+
+    writeln("build vertices for spheres");
 
     for (int i = 0; i < spheresX; i++)
     {
@@ -287,10 +296,12 @@ void main() {
           for (int k = 0; k < spheresZ; k++)
           {
               GLfloat cZ = 0.2 * k;
-              vertices = generateVertices([cX, cY, cZ, 1.0], 0.1, 4 , 8);
+              GLfloat[][] sphereData = generateVerticesAndNormals([cX, cY, cZ, 1.0], 0.08, 6 , 12);
+              vertices = sphereData[0];
+              normals = sphereData[1];
               colors = generateColorArray(vertices);
-              prepareSphereBuffers(vertices, colors, vao[vaoIndex], vbo, vertexLoc, vSize,
-                                   stride,  colorLoc, cSize, cPointer);
+              prepareSphereBuffers(vertices, normals, colors, vao[vaoIndex], vbo, nbo, vertexLoc, vSize,
+                                   stride,  colorLoc, cSize, cPointer, normalLoc);
               glCheckError();
               sphereIndices ~= [vaoIndex];
               sphereVertexCount = vertices.length;
@@ -299,35 +310,43 @@ void main() {
       }
     }
 
+    writeln(sphereVertexCount * vaoIndex-1);
+
   int i = 0, k = 1;
   uint frame = 0;
   auto range = iota(-100, 100);
+
+  GLfloat[VECTOR_SIZE] movementVector = [0,0,0];
+  glUseProgram(shaderProgram);
+  glUniform3fv(cast(uint)lightPositionLoc, 1, cast(const(float)*)[cameraX, cameraY, cameraZ]);
+  glUniform3fv(cast(uint)lightIntensitiesLoc, 1, cast(const(float)*)[1f,1f,1f]);
+  glUniform3fv(cast(uint)lightAmbientLoc, 1, cast(const(float)*)[0.1f,0.1f,0.1f]);
 
   while (!glfwWindowShouldClose(window)) {
     glClearColor(0.0, 0.0, 0.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    GLfloat[VECTOR_SIZE] movementVector = [0,0,0];
+    movementVector = [0,0,0];
 
     if(wIsDown)
     {
         GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 0, walkStepSize);
-        movementVector = add(movementVector, dMovementVector);
+        add(movementVector, dMovementVector, movementVector);
     }
     if(sIsDown)
     {
         GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 1, walkStepSize);
-        movementVector = add(movementVector, dMovementVector);
+        add(movementVector, dMovementVector, movementVector);
     }
     if(aIsDown)
     {
         GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 2, walkStepSize);
-        movementVector = add(movementVector, dMovementVector);
+        add(movementVector, dMovementVector, movementVector);
     }
     if(dIsDown)
     {
         GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 3, walkStepSize);
-        movementVector = add(movementVector, dMovementVector);
+        add(movementVector, dMovementVector, movementVector);
     }
 
     lookatX += movementVector[0];
@@ -336,7 +355,6 @@ void main() {
     cameraZ += movementVector[1];
 
     setCamera(cameraX, cameraY, cameraZ, lookatX, lookatY, lookatZ);
-    glUseProgram(shaderProgram);
     setUniforms();
 
     //////////////////////////////////////////////////////////////////////////////
@@ -348,6 +366,7 @@ void main() {
         drawSphere(vao, sphereVertexCount);
     }
 
+    //Draw axis
     glBindVertexArray(vao[0]);
     glDrawArrays(GL_LINES, 0, 6);
 

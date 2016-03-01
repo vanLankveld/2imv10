@@ -23,15 +23,18 @@ GLfloat selfDotProduct(GLfloat[VECTOR_SIZE] a) {
   return a[0] * a[0] + a[1] * a[1] + a[2] * a[2];
 }
 
-GLfloat[VECTOR_SIZE] add(GLfloat[VECTOR_SIZE] a, GLfloat[VECTOR_SIZE] b)
+void add(ref GLfloat[VECTOR_SIZE] a, ref GLfloat[VECTOR_SIZE] b, ref GLfloat[VECTOR_SIZE] result)
 {
-    GLfloat[VECTOR_SIZE] result =
-    [
-        a[0] + b[0],
-        a[1] + b[1],
-        a[2] + b[2]
-    ];
-    return result;
+    result[0] = a[0] + b[0];
+    result[1] = a[1] + b[1];
+    result[2] = a[2] + b[2];
+}
+
+void subtract(ref GLfloat[VECTOR_SIZE] a, ref GLfloat[VECTOR_SIZE] b, ref GLfloat[VECTOR_SIZE] result)
+{
+    result[0] = a[0] - b[0];
+    result[1] = a[1] - b[1];
+    result[2] = a[2] - b[2];
 }
 
 GLfloat[VECTOR_SIZE] subtract(GLfloat[VECTOR_SIZE] a, GLfloat[VECTOR_SIZE] b)
