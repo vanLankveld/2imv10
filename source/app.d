@@ -310,7 +310,7 @@ void main() {
       }
     }
 
-    writeln(sphereVertexCount * vaoIndex-1);
+  writeln(sphereVertexCount * vaoIndex-1);
 
   int i = 0, k = 1;
   uint frame = 0;
