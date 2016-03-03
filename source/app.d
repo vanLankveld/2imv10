@@ -30,17 +30,23 @@ GLfloat[3][] parDP; // Current particle delta p
 GLfloat[3][] parVel; // Current particle velocities
 GLfloat[] parLam; // Current particle lambda values
 
-GLfloat g = 0.001; // Gravity force
+GLfloat g = 0.3; // Gravity force
 GLfloat h = 0.075; // Kernel size
 GLfloat rho = 0.008; // Rest density
 GLfloat eps = 0.02; // Relaxation parameter
 
-int solveIter = 2;
+GLfloat absDQ = 0.2; // Fixed distance scaled in smoothing kernel for tensile instability stuff
+GLfloat nPow = 4; // Power for that stuff
+GLfloat kScale = 0.1; // Scalar for that stuff
+
+int solveIter = 3; //Number of corrective calculation cycles
+
+int fps = 30; //Number of frames per second
 
 ulong sphereVertexCount;
 
 //Bounds
-GLfloat[VECTOR_SIZE] bounds = [1,0.5,1];
+GLfloat[VECTOR_SIZE] bounds = [0.5,1.5,0.5];
 
 //Camera position
 GLfloat lookatX = 0;
@@ -202,7 +208,7 @@ void updateState(GLfloat dt){
     {
         parVel[sphereIndex] = [parVel[sphereIndex][0], parVel[sphereIndex][1] - g*dt, parVel[sphereIndex][2]];
         for (int j = 0; j < VECTOR_SIZE; j++){
-            parAux[sphereIndex][j] = parPos[sphereIndex][j] + parVel[sphereIndex][j];
+            parAux[sphereIndex][j] = parPos[sphereIndex][j] + parVel[sphereIndex][j]*dt;
         }
 
     }
@@ -248,7 +254,12 @@ void updateState(GLfloat dt){
             for (int neighIndex = cast(int)sphereIndices.length - 1; neighIndex >= 0; neighIndex--)
             {
                 if(sphereIndex != neighIndex){
-                    GLfloat scalar = parLam[sphereIndex] + parLam[neighIndex];
+                    GLfloat sCorr =  -kScale;
+                    GLfloat frac = IKGaussFromDist(distance(subtract(parAux[sphereIndex], parAux[neighIndex])), h)/IKGaussFromDist(absDQ*h, h);
+                    for (int n = 0; n < nPow; n++){
+                        sCorr *= frac;
+                    }
+                    GLfloat scalar = parLam[sphereIndex] + parLam[neighIndex] + sCorr;
                     GLfloat[VECTOR_SIZE] da = daIKGauss(subtract(parAux[sphereIndex], parAux[neighIndex]), h);
                     dp = [dp[0] + da[0]*scalar, dp[1] + da[1]*scalar, dp[2] + da[2]*scalar];
                 }
@@ -315,9 +326,9 @@ void main() {
   GLFWwindow* window;
 
   if (fullscreen) {
-    window = glfwCreateWindow(640, 480, "Hello World", glfwGetPrimaryMonitor(), null);
+    window = glfwCreateWindow(640, 480, "Hello Blueberries", glfwGetPrimaryMonitor(), null);
   } else {
-    window = glfwCreateWindow(640, 480, "Hello World", null, null);
+    window = glfwCreateWindow(640, 480, "Hello Blueberries", null, null);
   }
 
   if (!window) {
@@ -487,12 +498,12 @@ void main() {
 
     //////////////////////////////////////////////////////////////////////////////
     // Update the points
+    updateState(1.0/cast(GLfloat) fps);
 
-    updateState(1);
-
-    if(iter%40 == 0){
+    if(iter%(4*fps) == 0){
               createParticle([uniform(-0.1, 0.1),0.5,uniform(-0.1, 0.1)], vaoIndex);
               vaoIndex++;
+              writeln(vaoIndex);
     }
 
     // Update spheres
