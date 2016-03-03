@@ -39,7 +39,8 @@ GLfloat absDQ = 0.2; // Fixed distance scaled in smoothing kernel for tensile in
 GLfloat nPow = 4; // Power for that stuff
 GLfloat kScale = 0.1; // Scalar for that stuff
 
-int solveIter = 3; //Number of corrective calculation cycles
+int solveIter = 3; // Number of corrective calculation cycles
+int numUpdates = 5; // Number of updates per frame
 
 int fps = 30; //Number of frames per second
 
@@ -498,12 +499,16 @@ void main() {
 
     //////////////////////////////////////////////////////////////////////////////
     // Update the points
-    updateState(1.0/cast(GLfloat) fps);
+    for (int u = 0; u < numUpdates; u++){
+        updateState(1.0/cast(GLfloat) fps);
 
-    if(iter%(4*fps) == 0){
+        if(iter%(4*fps) == 0){
               createParticle([uniform(-0.1, 0.1),0.5,uniform(-0.1, 0.1)], vaoIndex);
               vaoIndex++;
               writeln(vaoIndex);
+        }
+
+        iter++;
     }
 
     // Update spheres
@@ -534,7 +539,6 @@ void main() {
     glfwSwapBuffers(window);
     glfwPollEvents();
 
-    iter++;
 
     if (fullscreen && glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
       glfwSetWindowShouldClose(window, GL_TRUE);
