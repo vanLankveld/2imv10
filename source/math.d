@@ -13,6 +13,16 @@ void crossProduct(ref GLfloat[VECTOR_SIZE] a, ref GLfloat[VECTOR_SIZE] b, ref GL
   res[2] = a[0] * b[1] - b[0] * a[1];
 }
 
+// res = a dot b;
+GLfloat dotProduct(GLfloat[VECTOR_SIZE] a, GLfloat[VECTOR_SIZE] b) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+// res = a dot b;
+GLfloat selfDotProduct(GLfloat[VECTOR_SIZE] a) {
+  return a[0] * a[0] + a[1] * a[1] + a[2] * a[2];
+}
+
 void add(ref GLfloat[VECTOR_SIZE] a, ref GLfloat[VECTOR_SIZE] b, ref GLfloat[VECTOR_SIZE] result)
 {
     result[0] = a[0] + b[0];
@@ -26,6 +36,17 @@ void subtract(ref GLfloat[VECTOR_SIZE] a, ref GLfloat[VECTOR_SIZE] b, ref GLfloa
     result[1] = a[1] - b[1];
     result[2] = a[2] - b[2];
 }
+
+GLfloat[VECTOR_SIZE] subtract(GLfloat[VECTOR_SIZE] a, GLfloat[VECTOR_SIZE] b)
+{
+    GLfloat[VECTOR_SIZE] result =
+    [
+        a[0] - b[0],
+        a[1] - b[1],
+        a[2] - b[2]
+    ];
+    return result;
+}
  
 // normalize a vec3
 void normalize(ref GLfloat[VECTOR_SIZE] a) {
@@ -33,6 +54,32 @@ void normalize(ref GLfloat[VECTOR_SIZE] a) {
   a[0] /= mag;
   a[1] /= mag;
   a[2] /= mag;
+}
+
+// get the distance of a vec3
+GLfloat distance(GLfloat[VECTOR_SIZE] a) {
+  return sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+}
+
+// get the Gaussian interpolation kernel of x for kernel size h
+GLfloat IKGaussFromDist(GLfloat x, ref GLfloat h) {
+  GLfloat result = exp(-(pow(x/h, 2)));
+  return result / (h*sqrt(PI));
+}
+
+// get the b-derivative of the Gaussian interpolation kernel of vec3 a-b for kernel size h
+GLfloat[VECTOR_SIZE] dbIKGauss(GLfloat[VECTOR_SIZE] x, ref GLfloat h) {
+  GLfloat dist = distance(x);
+  GLfloat fac = 2 * dist * IKGaussFromDist(dist,h) / (h*h);
+  GLfloat[VECTOR_SIZE] norm = [x[0], x[1], x[2]];
+  normalize(norm);
+  return [norm[0] * fac, norm[1] * fac, norm[2] * fac];
+}
+
+// get the a-derivative (or (a-b)-derivative) of the Gaussian interpolation kernel of vec3 a-b for kernel size h
+GLfloat[VECTOR_SIZE] daIKGauss(GLfloat[VECTOR_SIZE] x, ref GLfloat h) {
+  GLfloat[VECTOR_SIZE] db = dbIKGauss(x,h);
+  return [-db[0], -db[1], -db[2]];
 }
 
 // sets the square matrix mat to the identity matrix,
