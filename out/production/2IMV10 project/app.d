@@ -4,6 +4,7 @@ import std.math;
 import std.stdio;
 import std.range;
 import std.string;
+import std.random;
 
 import derelict.opengl3.gl3;
 import derelict.glfw3.glfw3;
@@ -22,8 +23,31 @@ GLfloat[MATRIX_SIZE] viewMatrix;
 
 GLuint[1000000] vao;
 
-GLuint[] sphereIndices;
+GLuint[] sphereIndices; // Particle indices for vao
+GLfloat[3][] parPos; // Current particle positions
+GLfloat[3][] parAux; // Auxiliary particle positions
+GLfloat[3][] parDP; // Current particle delta p
+GLfloat[3][] parVel; // Current particle velocities
+GLfloat[] parLam; // Current particle lambda values
+
+GLfloat g = 0.3; // Gravity force
+GLfloat h = 0.075; // Kernel size
+GLfloat rho = 0.008; // Rest density
+GLfloat eps = 0.02; // Relaxation parameter
+
+GLfloat absDQ = 0.2; // Fixed distance scaled in smoothing kernel for tensile instability stuff
+GLfloat nPow = 4; // Power for that stuff
+GLfloat kScale = 0.1; // Scalar for that stuff
+
+int solveIter = 3; // Number of corrective calculation cycles
+int numUpdates = 5; // Number of updates per frame
+
+int fps = 30; //Number of frames per second
+
 ulong sphereVertexCount;
+
+//Bounds
+GLfloat[VECTOR_SIZE] bounds = [0.5,1.5,0.5];
 
 //Camera position
 GLfloat lookatX = 0;
@@ -67,7 +91,8 @@ void printProgramInfoLog(GLuint program) {
 
   if (infologLength > 0) {
     char[] infoLog;
-    glGetProgramInfoLog(program, infologLength, &charsWritten, infoLog.ptr);
+    //glGetProgramInfoLog(program, infologLength, &charsWritten, infoLog.ptr);
+    //Generates errors for Leo
     writeln(infoLog);
   } else {
     writeln("no program info log");
@@ -177,6 +202,108 @@ void setCamera(GLfloat posX, GLfloat posY, GLfloat posZ, GLfloat lookAtX, GLfloa
   multMatrix(viewMatrix, aux);
 }
 
+// Updates the state of particles for a time difference dt
+void updateState(GLfloat dt){
+
+    for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
+    {
+        parVel[sphereIndex] = [parVel[sphereIndex][0], parVel[sphereIndex][1] - g*dt, parVel[sphereIndex][2]];
+        for (int j = 0; j < VECTOR_SIZE; j++){
+            parAux[sphereIndex][j] = parPos[sphereIndex][j] + parVel[sphereIndex][j]*dt;
+        }
+
+    }
+
+    for (int i = 0; i < solveIter; i++){
+
+        for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
+        {
+            GLfloat rhoi = 0;
+            for (int neighIndex = cast(int)sphereIndices.length - 1; neighIndex >= 0; neighIndex--)
+            {
+                if(sphereIndex != neighIndex){
+                    rhoi += IKGaussFromDist(distance(subtract(parAux[sphereIndex], parAux[neighIndex])), h);
+                }
+            }
+
+            GLfloat PkSum = 0;
+            for (int neighIndex = cast(int)sphereIndices.length - 1; neighIndex >= 0; neighIndex--)
+            {
+                GLfloat summand = 0;
+                if(sphereIndex != neighIndex){
+                    GLfloat[VECTOR_SIZE] db = dbIKGauss(subtract(parAux[sphereIndex], parAux[neighIndex]), h);
+                    summand = selfDotProduct(db);
+                } else {
+                    for (int neighIndex2 = cast(int)sphereIndices.length - 1; neighIndex2 >= 0; neighIndex2--)
+                    {
+                        if(sphereIndex != neighIndex2){
+                            GLfloat[VECTOR_SIZE] da = daIKGauss(subtract(parAux[sphereIndex], parAux[neighIndex2]), h);
+                            summand += selfDotProduct(da);
+                        }
+                    }
+                }
+                PkSum += summand;
+            }
+            PkSum /= (rho*rho);
+
+            parLam[sphereIndex] = (rhoi/rho - 1)/(PkSum + eps);
+        }
+
+        for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
+        {
+            GLfloat[VECTOR_SIZE] dp = [0,0,0];
+            for (int neighIndex = cast(int)sphereIndices.length - 1; neighIndex >= 0; neighIndex--)
+            {
+                if(sphereIndex != neighIndex){
+                    GLfloat sCorr =  -kScale;
+                    GLfloat frac = IKGaussFromDist(distance(subtract(parAux[sphereIndex], parAux[neighIndex])), h)/IKGaussFromDist(absDQ*h, h);
+                    for (int n = 0; n < nPow; n++){
+                        sCorr *= frac;
+                    }
+                    GLfloat scalar = parLam[sphereIndex] + parLam[neighIndex] + sCorr;
+                    GLfloat[VECTOR_SIZE] da = daIKGauss(subtract(parAux[sphereIndex], parAux[neighIndex]), h);
+                    dp = [dp[0] + da[0]*scalar, dp[1] + da[1]*scalar, dp[2] + da[2]*scalar];
+                }
+            }
+            parDP[sphereIndex] = dp;
+            //Collision detection with aquarium (faulty)
+            for (int j = 0; j < 3; j++){
+                if(parDP[sphereIndex][j] + parAux[sphereIndex][j] > bounds[j]){
+                    parDP[sphereIndex][j] = bounds[j] - parAux[sphereIndex][j];
+                } else if(parDP[sphereIndex][j] + parAux[sphereIndex][j] < -bounds[j]){
+                    parDP[sphereIndex][j] = -bounds[j] - parAux[sphereIndex][j];
+                }
+            }
+        }
+
+        for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
+        {
+            for (int j = 0; j < VECTOR_SIZE; j++){
+                parAux[sphereIndex][j] = parDP[sphereIndex][j] + parAux[sphereIndex][j];
+            }
+        }
+    }
+
+    for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
+    {
+        for (int j = 0; j < VECTOR_SIZE; j++){
+            parVel[sphereIndex][j] = (parAux[sphereIndex][j] - parPos[sphereIndex][j])/dt;
+        }
+        parPos[sphereIndex] = parAux[sphereIndex];
+    }
+
+}
+
+// Creates a new particle from position p
+void createParticle(GLfloat[VECTOR_SIZE] p, int vaoIndex){
+    sphereIndices ~= vaoIndex;
+    parPos ~= p;
+    parAux ~= [0,0,0];
+    parDP ~= [0,0,0];
+    parVel ~= [0,0,0];
+    parLam ~= [0,0,0];
+}
+
 // adapted from http://open.gl/drawing and
 // http://www.lighthouse3d.com/cg-topics/code-samples/opengl-3-3-glsl-1-5-sample
 void main() {
@@ -200,9 +327,9 @@ void main() {
   GLFWwindow* window;
 
   if (fullscreen) {
-    window = glfwCreateWindow(640, 480, "Hello World", glfwGetPrimaryMonitor(), null);
+    window = glfwCreateWindow(640, 480, "Hello Blueberries", glfwGetPrimaryMonitor(), null);
   } else {
-    window = glfwCreateWindow(640, 480, "Hello World", null, null);
+    window = glfwCreateWindow(640, 480, "Hello Blueberries", null, null);
   }
 
   if (!window) {
@@ -281,34 +408,38 @@ void main() {
     GLfloat[] colors;
     GLuint vaoIndex = 1;
 
-    int spheresX = 5;
-    int spheresY = 5;
-    int spheresZ = 5;
+    int spheresX = 1;
+    int spheresY = 1;
+    int spheresZ = 1;
 
     writeln("build vertices for spheres");
 
     for (int i = 0; i < spheresX; i++)
     {
-      GLfloat cX = 0.2 * i;
+      GLfloat cX = 0.2 * i + uniform(0.0, 0.15);
       for (int j = 0; j < spheresY; j++)
       {
-          GLfloat cY = 0.2 * j;
+          GLfloat cY = 0.2 * j + uniform(0.0, 0.15);
           for (int k = 0; k < spheresZ; k++)
           {
-              GLfloat cZ = 0.2 * k;
-              GLfloat[][] sphereData = generateVerticesAndNormals([cX, cY, cZ, 1.0], 0.08, 6 , 12);
+              GLfloat cZ = 0.2 * k + uniform(0.0, 0.15);
+              GLfloat[3] center = [cX, cY, cZ];
+              createParticle(center, vaoIndex);
+              /*GLfloat[][] sphereData = generateVerticesAndNormals([center[0], center[1], center[2], 1.0], 0.08, 6 , 12);
               vertices = sphereData[0];
               normals = sphereData[1];
               colors = generateColorArray(vertices);
               prepareSphereBuffers(vertices, normals, colors, vao[vaoIndex], vbo, nbo, vertexLoc, vSize,
                                    stride,  colorLoc, cSize, cPointer, normalLoc);
-              glCheckError();
-              sphereIndices ~= [vaoIndex];
-              sphereVertexCount = vertices.length;
+              glCheckError();*/
               vaoIndex++;
           }
       }
     }
+
+    GLfloat[][] gVaA = generateVerticesAndNormals([0, 0, 0, 1.0], 0.08, 6 , 12);
+    vertices = gVaA[0];
+    sphereVertexCount = vertices.length;
 
     writeln(sphereVertexCount * vaoIndex-1);
 
@@ -316,11 +447,19 @@ void main() {
   uint frame = 0;
   auto range = iota(-100, 100);
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Tests
+  writeln(daIKGauss([0,0,1],h));
+  writeln("end tests");
+
+
   GLfloat[VECTOR_SIZE] movementVector = [0,0,0];
   glUseProgram(shaderProgram);
   glUniform3fv(cast(uint)lightPositionLoc, 1, cast(const(float)*)[cameraX, cameraY, cameraZ]);
   glUniform3fv(cast(uint)lightIntensitiesLoc, 1, cast(const(float)*)[1f,1f,1f]);
   glUniform3fv(cast(uint)lightAmbientLoc, 1, cast(const(float)*)[0.1f,0.1f,0.1f]);
+
+  int iter = 0;
 
   while (!glfwWindowShouldClose(window)) {
     glClearColor(0.0, 0.0, 0.0, 1.0);
@@ -357,10 +496,37 @@ void main() {
     setCamera(cameraX, cameraY, cameraZ, lookatX, lookatY, lookatZ);
     setUniforms();
 
+
+    //////////////////////////////////////////////////////////////////////////////
+    // Update the points
+    for (int u = 0; u < numUpdates; u++){
+        updateState(1.0/cast(GLfloat) fps);
+
+        if(iter%(4*fps) == 0){
+              createParticle([uniform(-0.1, 0.1),0.5,uniform(-0.1, 0.1)], vaoIndex);
+              vaoIndex++;
+              writeln(vaoIndex);
+        }
+
+        iter++;
+    }
+
+    // Update spheres
+    for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
+    {
+              GLfloat[][] sphereData = generateVerticesAndNormals([parPos[sphereIndex][0] ,parPos[sphereIndex][1] ,parPos[sphereIndex][2] ,1.0], 0.12, 6 , 12);
+              vertices = sphereData[0];
+              normals = sphereData[1];
+              colors = generateColorArray(vertices);
+              prepareSphereBuffers(vertices, normals, colors, vao[sphereIndices[sphereIndex]], vbo, nbo, vertexLoc, vSize,
+                                   stride,  colorLoc, cSize, cPointer, normalLoc);
+              glCheckError();
+    }
+
     //////////////////////////////////////////////////////////////////////////////
     // Draw the spheres
 
-    for (int sphereIndex = 0; sphereIndex < sphereIndices.length; sphereIndex++)
+    for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
     {
         GLuint vao = vao[sphereIndices[sphereIndex]];
         drawSphere(vao, sphereVertexCount);
@@ -372,6 +538,7 @@ void main() {
 
     glfwSwapBuffers(window);
     glfwPollEvents();
+
 
     if (fullscreen && glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
       glfwSetWindowShouldClose(window, GL_TRUE);
