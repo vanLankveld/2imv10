@@ -8,7 +8,7 @@ import derelict.glfw3.glfw3;
 
 
 void prepareSphereBuffers(GLfloat[] vertices, GLfloat[] normals, GLfloat[] colors, GLuint vao, GLuint[] vbo, GLuint nbo, GLuint vertexLoc, GLint vSize,
-                GLsizei stride, GLuint colorLoc, GLint cSize, const GLvoid* cPointer, GLuint normalLoc)
+                GLsizei stride, GLuint colorLoc, GLint cSize, const GLvoid* cPointer, GLuint normalLoc, GLuint offsetLoc, GLuint obo, GLfloat[] offsets)
 {
     // VAO for the sphere
     glBindVertexArray(vao);
@@ -24,6 +24,20 @@ void prepareSphereBuffers(GLfloat[] vertices, GLfloat[] normals, GLfloat[] color
     glBufferData(GL_ARRAY_BUFFER, colors.length * GLfloat.sizeof, colors.ptr, GL_DYNAMIC_DRAW);
     glEnableVertexAttribArray(colorLoc);
     glVertexAttribPointer(colorLoc, cSize, GL_FLOAT, GL_FALSE, stride, cPointer);
+
+    glGenBuffers(1, &obo);
+    glBindBuffer(GL_ARRAY_BUFFER, obo);
+    glBufferData(GL_ARRAY_BUFFER, offsets.length * GLfloat.sizeof, offsets.ptr, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(offsetLoc);
+    glBindBuffer(GL_ARRAY_BUFFER, obo);
+    glVertexAttribPointer(
+        offsetLoc,
+        4,
+        GL_FLOAT,
+        GL_FALSE,
+        stride,
+        null
+    );
 
     glGenBuffers(1, &nbo);
     glBindBuffer(GL_ARRAY_BUFFER, nbo);

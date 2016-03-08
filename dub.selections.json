@@ -2,6 +2,7 @@
 	"fileVersion": 1,
 	"versions": {
 		"derelict-util": "2.0.4",
+		"gl3n": "~master",
 		"derelict-gl3": "~master",
 		"derelict-glfw3": "~master"
 	}

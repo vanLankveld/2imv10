@@ -8,6 +8,7 @@ import std.random;
 
 import derelict.opengl3.gl3;
 import derelict.glfw3.glfw3;
+import gl3n.linalg;
 import _2imv10.sphere;
 
 import mfellner.exception;
@@ -16,12 +17,13 @@ import mfellner.math;
 bool fullscreen = false;
 
 GLuint vertexLoc, colorLoc, normalLoc;
-GLuint projMatrixLoc, viewMatrixLoc, lightIntensitiesLoc, lightPositionLoc, lightAmbientLoc;
+GLuint projMatrixLoc, offsetLoc, viewMatrixLoc, lightIntensitiesLoc, lightPositionLoc, lightAmbientLoc;
 
 GLfloat[MATRIX_SIZE] projMatrix;
 GLfloat[MATRIX_SIZE] viewMatrix;
 
 GLuint[1000000] vao;
+GLuint vaoSpheres;
 
 GLuint[] sphereIndices; // Particle indices for vao
 GLfloat[3][] parPos; // Current particle positions
@@ -29,6 +31,11 @@ GLfloat[3][] parAux; // Auxiliary particle positions
 GLfloat[3][] parDP; // Current particle delta p
 GLfloat[3][] parVel; // Current particle velocities
 GLfloat[] parLam; // Current particle lambda values
+
+GLfloat[][] sphereData;
+GLfloat[] sphereVertexTemplates;
+GLfloat[] sphereNormals;
+GLfloat[] sphereColors;
 
 GLfloat g = 0.3; // Gravity force
 GLfloat h = 0.075; // Kernel size
@@ -307,101 +314,116 @@ void createParticle(GLfloat[VECTOR_SIZE] p, int vaoIndex){
 // adapted from http://open.gl/drawing and
 // http://www.lighthouse3d.com/cg-topics/code-samples/opengl-3-3-glsl-1-5-sample
 void main() {
-  DerelictGL3.load();
-  DerelictGLFW3.load();
+    DerelictGL3.load();
+    DerelictGLFW3.load();
 
-  glfwSetErrorCallback(&glfwPrintError);
+    glfwSetErrorCallback(&glfwPrintError);
 
-  if(!glfwInit()) {
-    glfwTerminate();
-    throw new Exception("Failed to create glcontext");
-  }
+    if(!glfwInit())
+    {
+        glfwTerminate();
+        throw new Exception("Failed to create glcontext");
+    }
 
-  glfwWindowHint(GLFW_SAMPLES, 4);
-  glfwWindowHint(GLFW_RESIZABLE, GL_TRUE);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-  glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+    glfwWindowHint(GLFW_SAMPLES, 4);
+    glfwWindowHint(GLFW_RESIZABLE, GL_TRUE);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
-  GLFWwindow* window;
+    GLFWwindow* window;
 
-  if (fullscreen) {
-    window = glfwCreateWindow(640, 480, "Hello Blueberries", glfwGetPrimaryMonitor(), null);
-  } else {
-    window = glfwCreateWindow(640, 480, "Hello Blueberries", null, null);
-  }
+    if (fullscreen)
+    {
+        window = glfwCreateWindow(640, 480, "Hello Blueberries", glfwGetPrimaryMonitor(), null);
+    }
+    else
+    {
+        window = glfwCreateWindow(640, 480, "Hello Blueberries", null, null);
+    }
 
-  if (!window) {
-    glfwTerminate();
-    throw new Exception("Failed to create window");
-  }
+    if (!window)
+    {
+        glfwTerminate();
+        throw new Exception("Failed to create window");
+    }
 
-  glfwSetFramebufferSizeCallback(window, &reshape);
-  glfwMakeContextCurrent(window);
+    glfwSetFramebufferSizeCallback(window, &reshape);
+    glfwMakeContextCurrent(window);
 
-  glfwSetKeyCallback(window, &key_callback);
+    glfwSetKeyCallback(window, &key_callback);
 
-  DerelictGL3.reload();
+    DerelictGL3.reload();
 
-  writefln("Vendor:   %s",   to!string(glGetString(GL_VENDOR)));
-  writefln("Renderer: %s",   to!string(glGetString(GL_RENDERER)));
-  writefln("Version:  %s",   to!string(glGetString(GL_VERSION)));
-  writefln("GLSL:     %s\n", to!string(glGetString(GL_SHADING_LANGUAGE_VERSION)));
+    writefln("Vendor:   %s",   to!string(glGetString(GL_VENDOR)));
+    writefln("Renderer: %s",   to!string(glGetString(GL_RENDERER)));
+    writefln("Version:  %s",   to!string(glGetString(GL_VERSION)));
+    writefln("GLSL:     %s\n", to!string(glGetString(GL_SHADING_LANGUAGE_VERSION)));
 
-  glEnable(GL_DEPTH_TEST);
-  glEnable(GL_CULL_FACE);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
 
-  //////////////////////////////////////////////////////////////////////////////
-  // Prepare shader program
-  GLuint vertexShader   = compileShader("source/shader/minimal.vert", GL_VERTEX_SHADER);
-  GLuint fragmentShader = compileShader("source/shader/minimal.frag", GL_FRAGMENT_SHADER);
+    //////////////////////////////////////////////////////////////////////////////
+    // Prepare shader program
+    GLuint vertexShader   = compileShader("source/shader/minimal.vert", GL_VERTEX_SHADER);
+    GLuint fragmentShader = compileShader("source/shader/minimal.frag", GL_FRAGMENT_SHADER);
 
-  GLuint shaderProgram = glCreateProgram();
-  glAttachShader(shaderProgram, vertexShader);
-  glAttachShader(shaderProgram, fragmentShader);
-  glBindFragDataLocation(shaderProgram, 0, "outColor");
-  glLinkProgram(shaderProgram);
-  printProgramInfoLog(shaderProgram);
+    GLuint shaderProgram = glCreateProgram();
+    glAttachShader(shaderProgram, vertexShader);
+    glAttachShader(shaderProgram, fragmentShader);
+    glBindFragDataLocation(shaderProgram, 0, "outColor");
+    glLinkProgram(shaderProgram);
+    printProgramInfoLog(shaderProgram);
 
-  vertexLoc = glGetAttribLocation(shaderProgram,"position");
-  colorLoc = glGetAttribLocation(shaderProgram, "color");
-  normalLoc = glGetAttribLocation(shaderProgram, "normal");
+    vertexLoc = glGetAttribLocation(shaderProgram,"position");
+    colorLoc = glGetAttribLocation(shaderProgram, "color");
+    normalLoc = glGetAttribLocation(shaderProgram, "normal");
+    offsetLoc = glGetAttribLocation(shaderProgram, "offset");
 
-  projMatrixLoc = glGetUniformLocation(shaderProgram, "projMatrix");
-  viewMatrixLoc = glGetUniformLocation(shaderProgram, "viewMatrix");
-  lightPositionLoc = glGetUniformLocation(shaderProgram, "lightPosition");
-  lightIntensitiesLoc = glGetUniformLocation(shaderProgram, "lightIntensities");
-  lightAmbientLoc = glGetUniformLocation(shaderProgram, "lightAmbient");
-  glCheckError();
+    projMatrixLoc = glGetUniformLocation(shaderProgram, "projMatrix");
+    viewMatrixLoc = glGetUniformLocation(shaderProgram, "viewMatrix");
+    lightPositionLoc = glGetUniformLocation(shaderProgram, "lightPosition");
+    lightIntensitiesLoc = glGetUniformLocation(shaderProgram, "lightIntensities");
+    lightAmbientLoc = glGetUniformLocation(shaderProgram, "lightAmbient");
+    glCheckError();
 
-  GLuint[2] vbo;
-  GLuint nbo;
-  glGenVertexArrays(1000000, vao.ptr);
-  GLint            vSize = 4, cSize = 3;
-  GLsizei         stride = 4 * float.sizeof;
-  const GLvoid* cPointer = null; //cast(void*)(? * GLfloat.sizeof);
+    GLuint[2] vbo;
+    GLuint nbo;
+    GLuint obo;
+    glGenVertexArrays(1000000, vao.ptr);
+    GLint            vSize = 4, cSize = 3;
+    GLsizei         stride = 4 * float.sizeof;
+    const GLvoid* cPointer = null; //cast(void*)(? * GLfloat.sizeof);
 
-  //////////////////////////////////////////////////////////////////////////////
-  // VAO for the Axis
-  glBindVertexArray(vao[0]);
-  // Generate two slots for the vertex and color buffers
-  glGenBuffers(2, vbo.ptr);
-  // bind buffer for vertices and copy data into buffer
-  glBindBuffer(GL_ARRAY_BUFFER, vbo[0]);
-  glBufferData(GL_ARRAY_BUFFER, verticesAxis.length * GLfloat.sizeof, verticesAxis.ptr, GL_STATIC_DRAW);
-  glEnableVertexAttribArray(vertexLoc);
-  glVertexAttribPointer(vertexLoc, vSize, GL_FLOAT, GL_FALSE, stride, null);
-  // bind buffer for colors and copy data into buffer
-  glBindBuffer(GL_ARRAY_BUFFER, vbo[1]);
-  glBufferData(GL_ARRAY_BUFFER, colorAxis.length * GLfloat.sizeof, colorAxis.ptr, GL_STATIC_DRAW);
-  glEnableVertexAttribArray(colorLoc);
-  glVertexAttribPointer(colorLoc, cSize, GL_FLOAT, GL_FALSE, stride, cPointer);
-  glCheckError();
+    //////////////////////////////////////////////////////////////////////////////
+    // VAO for the Axis
+    glBindVertexArray(vao[0]);
+    // Generate two slots for the vertex and color buffers
+    glGenBuffers(2, vbo.ptr);
+    // bind buffer for vertices and copy data into buffer
+    glBindBuffer(GL_ARRAY_BUFFER, vbo[0]);
+    glBufferData(GL_ARRAY_BUFFER, verticesAxis.length * GLfloat.sizeof, verticesAxis.ptr, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(vertexLoc);
+    glVertexAttribPointer(vertexLoc, vSize, GL_FLOAT, GL_FALSE, stride, null);
+    // bind buffer for colors and copy data into buffer
+    glBindBuffer(GL_ARRAY_BUFFER, vbo[1]);
+    glBufferData(GL_ARRAY_BUFFER, colorAxis.length * GLfloat.sizeof, colorAxis.ptr, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(colorLoc);
+    glVertexAttribPointer(colorLoc, cSize, GL_FLOAT, GL_FALSE, stride, cPointer);
+    glCheckError();
 
-  int width, height;
-  glfwGetWindowSize(window, &width, &height);
-  reshape(window, width, height);
+    int width, height;
+    glfwGetWindowSize(window, &width, &height);
+    reshape(window, width, height);
+
+    sphereData = generateVerticesAndNormals([0,0,0 ,1.0], 0.12, 6 , 12);
+    sphereVertexTemplates = sphereData[0];
+    sphereNormals = sphereData[1];
+    sphereColors = generateColorArray(sphereVertexTemplates);
+
+    writeln(sphereVertexTemplates);
+    writeln(sphereNormals);
 
     GLfloat[] vertices;
     GLfloat[] normals;
@@ -425,13 +447,6 @@ void main() {
               GLfloat cZ = 0.2 * k + uniform(0.0, 0.15);
               GLfloat[3] center = [cX, cY, cZ];
               createParticle(center, vaoIndex);
-              /*GLfloat[][] sphereData = generateVerticesAndNormals([center[0], center[1], center[2], 1.0], 0.08, 6 , 12);
-              vertices = sphereData[0];
-              normals = sphereData[1];
-              colors = generateColorArray(vertices);
-              prepareSphereBuffers(vertices, normals, colors, vao[vaoIndex], vbo, nbo, vertexLoc, vSize,
-                                   stride,  colorLoc, cSize, cPointer, normalLoc);
-              glCheckError();*/
               vaoIndex++;
           }
       }
@@ -514,23 +529,24 @@ void main() {
     // Update spheres
     for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
     {
-              GLfloat[][] sphereData = generateVerticesAndNormals([parPos[sphereIndex][0] ,parPos[sphereIndex][1] ,parPos[sphereIndex][2] ,1.0], 0.12, 6 , 12);
-              vertices = sphereData[0];
-              normals = sphereData[1];
-              colors = generateColorArray(vertices);
-              prepareSphereBuffers(vertices, normals, colors, vao[sphereIndices[sphereIndex]], vbo, nbo, vertexLoc, vSize,
-                                   stride,  colorLoc, cSize, cPointer, normalLoc);
-              glCheckError();
+        GLfloat[4] offset = [parPos[sphereIndex][0], parPos[sphereIndex][1], parPos[sphereIndex][2], 1.0];
+        GLfloat[] offsets;
+
+        while (offsets.length < sphereVertexTemplates.length)
+        {
+            offsets ~= offset;
+        }
+
+        prepareSphereBuffers(sphereVertexTemplates, sphereNormals, sphereColors, vao[sphereIndices[sphereIndex]], vbo, nbo, vertexLoc, vSize,
+                                               stride,  colorLoc, cSize, cPointer, normalLoc, offsetLoc, obo, offsets);
+        drawSphere(vao[sphereIndices[sphereIndex]], sphereVertexCount);
+        glCheckError();
     }
 
-    //////////////////////////////////////////////////////////////////////////////
-    // Draw the spheres
-
-    for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
-    {
-        GLuint vao = vao[sphereIndices[sphereIndex]];
-        drawSphere(vao, sphereVertexCount);
-    }
+    //prepareSphereBuffers(sphereVertexTemplates, sphereNormals, sphereColors, vaoSpheres, vbo, nbo, vertexLoc, vSize,
+    //                                     stride,  colorLoc, cSize, cPointer, normalLoc);
+    //glCheckError();
+    //drawSphere(vaoSpheres, sphereVertexTemplates.length);
 
     //Draw axis
     glBindVertexArray(vao[0]);

@@ -5,6 +5,7 @@
 	"authors": ["Guus"],
 	"dependencies": {
 		"derelict-gl3": "~master",
-		"derelict-glfw3": "~master"
+		"derelict-glfw3": "~master",
+		"gl3n": "~master"
 	}
 }
