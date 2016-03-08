@@ -422,9 +422,6 @@ void main() {
     sphereNormals = sphereData[1];
     sphereColors = generateColorArray(sphereVertexTemplates);
 
-    writeln(sphereVertexTemplates);
-    writeln(sphereNormals);
-
     GLfloat[] vertices;
     GLfloat[] normals;
     GLfloat[] colors;
@@ -526,22 +523,34 @@ void main() {
         iter++;
     }
 
-    // Update spheres
+    GLfloat[] offsets;
+
     for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
     {
-        GLfloat[4] offset = [parPos[sphereIndex][0], parPos[sphereIndex][1], parPos[sphereIndex][2], 1.0];
-        GLfloat[] offsets;
-
-        while (offsets.length < sphereVertexTemplates.length)
-        {
-            offsets ~= offset;
-        }
-
-        prepareSphereBuffers(sphereVertexTemplates, sphereNormals, sphereColors, vao[sphereIndices[sphereIndex]], vbo, nbo, vertexLoc, vSize,
-                                               stride,  colorLoc, cSize, cPointer, normalLoc, offsetLoc, obo, offsets);
-        drawSphere(vao[sphereIndices[sphereIndex]], sphereVertexCount);
-        glCheckError();
+        offsets ~= [parPos[sphereIndex][0], parPos[sphereIndex][1], parPos[sphereIndex][2], 1.0];
     }
+
+    prepareSphereBuffers(sphereVertexTemplates, sphereNormals, sphereColors, vao[1], vbo, nbo, vertexLoc, vSize,
+                                           stride,  colorLoc, cSize, cPointer, normalLoc);
+
+    glGenBuffers(1, &obo);
+    glBindBuffer(GL_ARRAY_BUFFER, obo);
+    glBufferData(GL_ARRAY_BUFFER, 4 * GLfloat.sizeof * sphereIndices.length, &offsets[0], GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(offsetLoc);
+    glVertexAttribPointer(
+        offsetLoc,
+        4,
+        GL_FLOAT,a
+        GL_FALSE,
+        stride,
+        null
+    );
+    glBindBuffer(GL_ARRAY_BUFFER, vertexLoc);
+    glVertexAttribDivisor(offsetLoc, 1);
+
+    glBindVertexArray(vao[1]);
+    glDrawArraysInstanced(GL_TRIANGLES, 0, cast(int)sphereVertexTemplates.length, cast(int)sphereIndices.length);
+    glCheckError();
 
     //prepareSphereBuffers(sphereVertexTemplates, sphereNormals, sphereColors, vaoSpheres, vbo, nbo, vertexLoc, vSize,
     //                                     stride,  colorLoc, cSize, cPointer, normalLoc);
