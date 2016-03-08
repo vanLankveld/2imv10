@@ -540,7 +540,7 @@ void main() {
     glVertexAttribPointer(
         offsetLoc,
         4,
-        GL_FLOAT,a
+        GL_FLOAT,
         GL_FALSE,
         stride,
         null
