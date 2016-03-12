@@ -35,26 +35,28 @@ GLfloat[] sphereNormals;
 GLfloat[] sphereColors;
 
 GLfloat g = 0.3; // Gravity force
-GLfloat h = 0.075; // Kernel size
-GLfloat rho = 0.008; // Rest density
+GLfloat h = 1.5; // Kernel size
+GLfloat rho = 0.0008; // Rest density
 GLfloat eps = 0.02; // Relaxation parameter
 
-GLfloat binsize = 0.2;
+GLfloat binsize = 1.0; // Size of bins for spatial partitioning, should be at least 4*h
 
 GLfloat absDQ = 0.2; // Fixed distance scaled in smoothing kernel for tensile instability stuff
 GLfloat nPow = 4; // Power for that stuff
 GLfloat kScale = 0.1; // Scalar for that stuff
 
+GLfloat cScale = 0.01; // Scalar for viscocity
+
 int solveIter = 3; // Number of corrective calculation cycles
 int numUpdates = 5; // Number of updates per frame
 
-int fps = 30; //Number of frames per second
+int fps = 15; //Number of frames per second
 
 ulong sphereVertexCount;
 
 //Bounds
-GLfloat[VECTOR_SIZE] boundsU = [0.5,1.5,0.5];
-GLfloat[VECTOR_SIZE] boundsL = [-0.5,-1.5,-0.5];
+GLfloat[VECTOR_SIZE] boundsU = [3.5,3.5,3.5];
+GLfloat[VECTOR_SIZE] boundsL = [-1.5,-3.5,-1.5];
 
 //Camera position
 GLfloat lookatX = 0;
@@ -209,86 +211,171 @@ void setCamera(GLfloat posX, GLfloat posY, GLfloat posZ, GLfloat lookAtX, GLfloa
   multMatrix(viewMatrix, aux);
 }
 
+void predictPositions(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat dt){
+    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+        {
+            parVel[sphereIndex] = [parVel[sphereIndex][0], parVel[sphereIndex][1] - g*dt, parVel[sphereIndex][2]];
+            for (int j = 0; j < VECTOR_SIZE; j++){
+                parAux[sphereIndex][j] = parPos[sphereIndex][j] + parVel[sphereIndex][j]*dt;
+            }
+        }
+}
+
+void boundPositions(ref GLfloat[VECTOR_SIZE][] parAux){
+
+        for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+        {
+            //Collision detection with aquarium (faulty)
+            for (int j = 0; j < 3; j++){
+                if(parAux[sphereIndex][j] > boundsU[j]){
+                    parAux[sphereIndex][j] = boundsU[j];
+                } else if(parAux[sphereIndex][j] < boundsL[j]){
+                    parAux[sphereIndex][j] = boundsL[j];
+                }
+            }
+        }
+}
+
+void setBinDims(ref int[VECTOR_SIZE] binDims){
+        for(int j = binDims.length -1; j >= 0; j--){
+            binDims[j] = to!int(ceil((boundsU[j] - boundsL[j])/binsize));
+        }
+}
+
+void assignBins(ref int[VECTOR_SIZE] binDims, ref int[][][][] bins, ref GLfloat[VECTOR_SIZE][] parAux, ref int[VECTOR_SIZE][] parBin){
+        for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+        {
+            int[VECTOR_SIZE] curbin;
+            for(int j = VECTOR_SIZE -1; j >= 0; j--){
+                curbin[j] = to!int((parAux[sphereIndex][j] - boundsL[j])/binsize);
+                if(curbin[j] == binDims[j] ) {
+                    curbin[j]--;
+                }
+            }
+
+            bins[curbin[0]][curbin[1]][curbin[2]] ~= sphereIndex;
+            parBin[sphereIndex] = curbin;
+        }
+}
+
+void assignNeighbours(ref int[VECTOR_SIZE] binDims, ref int[][][][] bins, ref GLfloat[VECTOR_SIZE][] parAux, ref int[VECTOR_SIZE][] parBin, ref int[][] neighbours){
+        for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+        {
+            int[VECTOR_SIZE] curbin = parBin[sphereIndex];
+            for (int dx = -1; dx <= 1; dx++){
+                if(curbin[0] + dx >= 0 && curbin[0] + dx < binDims[0]){
+                for (int dy = -1; dy <= 1; dy++){
+                    if(curbin[1] + dy >= 0 && curbin[1] + dy < binDims[1]){
+                    for (int dz = -1; dz <= 1; dz++){
+                        if(curbin[2] + dz >= 0 && curbin[2] + dz < binDims[2]){
+                            for(int binIndex = to!int(bins[curbin[0] + dx][curbin[1] + dy][curbin[2] + dz].length) - 1; binIndex >= 0; binIndex--){
+				                int neighIndex = bins[curbin[0] + dx][curbin[1] + dy][curbin[2] + dz][binIndex];
+				                if(distance(subtract(parAux[sphereIndex], parAux[neighIndex])) < binsize && sphereIndex != neighIndex){
+				                    neighbours[sphereIndex] ~= neighIndex;
+				                }
+			                }
+                        }
+                    }}
+                }}
+            }
+        }
+}
+
+void calculateLambdas(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[] parLam, ref int[][] neighbours){
+    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+    {
+        GLfloat rhoi = 0;
+        for (int neighIndex = to!int(neighbours[sphereIndex].length) - 1; neighIndex >= 0; neighIndex--)
+        {
+            if(sphereIndex != neighbours[sphereIndex][neighIndex]){
+                rhoi += IKGaussFromDist(distance(subtract(parAux[sphereIndex], parAux[neighbours[sphereIndex][neighIndex]])), h);
+            }
+        }
+
+        GLfloat PkSum = 0;
+        for (int neighIndex = to!int(neighbours[sphereIndex].length) - 1; neighIndex >= 0; neighIndex--)
+        {
+            GLfloat summand = 0;
+            if(sphereIndex != neighbours[sphereIndex][neighIndex]){
+                GLfloat[VECTOR_SIZE] db = dbIKGauss(subtract(parAux[sphereIndex], parAux[neighbours[sphereIndex][neighIndex]]), h);
+                summand = selfDotProduct(db);
+            } else {
+                for (int neighIndex2 = to!int(neighbours[sphereIndex].length) - 1; neighIndex2 >= 0; neighIndex2--)
+                {
+                    if(sphereIndex != neighbours[sphereIndex][neighIndex2]){
+                        GLfloat[VECTOR_SIZE] da = daIKGauss(subtract(parAux[sphereIndex], parAux[neighbours[sphereIndex][neighIndex2]]), h);
+                        summand += selfDotProduct(da);
+                    }
+                }
+            }
+            PkSum += summand;
+        }
+        PkSum /= (rho*rho);
+
+        parLam[sphereIndex] = (rhoi/rho - 1)/(PkSum + eps);
+    }
+}
+
+void calculateDeltaP(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[] parLam, ref GLfloat[VECTOR_SIZE][] parDP, ref int[][] neighbours){
+        for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+        {
+            GLfloat[VECTOR_SIZE] dp = [0,0,0];
+            for (int neighIndex = to!int(neighbours[sphereIndex].length) - 1; neighIndex >= 0; neighIndex--)
+            {
+                if(sphereIndex != neighbours[sphereIndex][neighIndex]){
+                    GLfloat sCorr =  -kScale;
+                    GLfloat frac = IKGaussFromDist(distance(subtract(parAux[sphereIndex], parAux[neighbours[sphereIndex][neighIndex]])), h)/IKGaussFromDist(absDQ*h, h);
+                    for (int n = 0; n < nPow; n++){
+                        sCorr *= frac;
+                    }
+                    GLfloat scalar = parLam[sphereIndex] + parLam[neighbours[sphereIndex][neighIndex]] + sCorr;
+                    GLfloat[VECTOR_SIZE] da = daIKGauss(subtract(parAux[sphereIndex], parAux[neighbours[sphereIndex][neighIndex]]), h);
+                    dp = [dp[0] + da[0]*scalar, dp[1] + da[1]*scalar, dp[2] + da[2]*scalar];
+                }
+            }
+            parDP[sphereIndex] = dp;
+        }
+}
+
+void applyDP(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[VECTOR_SIZE][] parDP){
+        for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+        {
+            for (int j = 0; j < VECTOR_SIZE; j++){
+                parAux[sphereIndex][j] = parDP[sphereIndex][j] + parAux[sphereIndex][j];
+            }
+        }
+}
+
 // Updates the state of particles for a time difference dt
 void updateState(GLfloat dt){
     GLfloat[VECTOR_SIZE][] parAux = new GLfloat[VECTOR_SIZE][](to!int(sphereIndices.length)); // Auxiliary particle positions
     GLfloat[VECTOR_SIZE][] parDP =  new GLfloat[VECTOR_SIZE][](to!int(sphereIndices.length)); // Current particle delta p
     GLfloat[] parLam =  new GLfloat[](to!int(sphereIndices.length)); // Current particle lambda values
-    int[][][][] bins = new int[][][][](
-        to!int(ceil((boundsU[0] - boundsL[0])/binsize)),
-        to!int(ceil((boundsU[1] - boundsL[1])/binsize)),
-        to!int(ceil((boundsU[2] - boundsL[2])/binsize)));
 
-    for (int sphereIndex = to!int(sphereIndices.length - 1); sphereIndex >= 0; sphereIndex--)
-    {
-        parVel[sphereIndex] = [parVel[sphereIndex][0], parVel[sphereIndex][1] - g*dt, parVel[sphereIndex][2]];
-        for (int j = 0; j < VECTOR_SIZE; j++){
-            parAux[sphereIndex][j] = parPos[sphereIndex][j] + parVel[sphereIndex][j]*dt;
-        }
+    predictPositions(parAux, dt);
 
-    }
+    boundPositions(parAux);
 
     for (int i = 0; i < solveIter; i++){
 
-        // Assign bins
-        for (int sphereIndex = to!int(sphereIndices.length - 1); sphereIndex >= 0; sphereIndex--)
+        int[][] neighbours = new int[][](to!int(sphereIndices.length)); // Current particle neighbours
+        int[VECTOR_SIZE] binDims;
+        setBinDims(binDims);
+        int[][][][] bins = new int[][][][](binDims[0], binDims[1], binDims[2]);
+        int[VECTOR_SIZE][] parBin = new int[VECTOR_SIZE][](to!int(sphereIndices.length)); // Current particle bin
+        assignBins(binDims, bins, parAux, parBin);// Assign bins
+        assignNeighbours(binDims, bins, parAux, parBin, neighbours);// Assign neighbours
+
+        // Calculate lambdas
+        calculateLambdas(parAux, parLam, neighbours);
+
+        // Calculate delta p + collision detection
+        calculateDeltaP(parAux, parLam, parDP, neighbours);
+
+        //Collision detection with aquarium (faulty)
+        /*for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
         {
 
-            //bins[][][] ~= sphereIndex; //((parPos[sphereIndex][0] - boundsU[0])/binsize)
-        }
-
-
-        for (int sphereIndex = to!int(sphereIndices.length - 1); sphereIndex >= 0; sphereIndex--)
-        {
-            GLfloat rhoi = 0;
-            for (int neighIndex = to!int(sphereIndices.length - 1); neighIndex >= 0; neighIndex--)
-            {
-                if(sphereIndex != neighIndex){
-                    rhoi += IKGaussFromDist(distance(subtract(parAux[sphereIndex], parAux[neighIndex])), h);
-                }
-            }
-
-            GLfloat PkSum = 0;
-            for (int neighIndex = to!int(sphereIndices.length - 1); neighIndex >= 0; neighIndex--)
-            {
-                GLfloat summand = 0;
-                if(sphereIndex != neighIndex){
-                    GLfloat[VECTOR_SIZE] db = dbIKGauss(subtract(parAux[sphereIndex], parAux[neighIndex]), h);
-                    summand = selfDotProduct(db);
-                } else {
-                    for (int neighIndex2 = to!int(sphereIndices.length - 1); neighIndex2 >= 0; neighIndex2--)
-                    {
-                        if(sphereIndex != neighIndex2){
-                            GLfloat[VECTOR_SIZE] da = daIKGauss(subtract(parAux[sphereIndex], parAux[neighIndex2]), h);
-                            summand += selfDotProduct(da);
-                        }
-                    }
-                }
-                PkSum += summand;
-            }
-            PkSum /= (rho*rho);
-
-            parLam[sphereIndex] = (rhoi/rho - 1)/(PkSum + eps);
-        }
-
-        for (int sphereIndex = to!int(sphereIndices.length - 1); sphereIndex >= 0; sphereIndex--)
-        {
-            GLfloat[VECTOR_SIZE] dp = [0,0,0];
-            for (int neighIndex = to!int(sphereIndices.length - 1); neighIndex >= 0; neighIndex--)
-            {
-                if(sphereIndex != neighIndex){
-                    GLfloat sCorr =  -kScale;
-                    GLfloat frac = IKGaussFromDist(distance(subtract(parAux[sphereIndex], parAux[neighIndex])), h)/IKGaussFromDist(absDQ*h, h);
-                    for (int n = 0; n < nPow; n++){
-                        sCorr *= frac;
-                    }
-                    GLfloat scalar = parLam[sphereIndex] + parLam[neighIndex] + sCorr;
-                    GLfloat[VECTOR_SIZE] da = daIKGauss(subtract(parAux[sphereIndex], parAux[neighIndex]), h);
-                    dp = [dp[0] + da[0]*scalar, dp[1] + da[1]*scalar, dp[2] + da[2]*scalar];
-                }
-            }
-            parDP[sphereIndex] = dp;
-            //Collision detection with aquarium (faulty)
             for (int j = 0; j < 3; j++){
                 if(parDP[sphereIndex][j] + parAux[sphereIndex][j] > boundsU[j]){
                     parDP[sphereIndex][j] = boundsU[j] - parAux[sphereIndex][j];
@@ -296,24 +383,103 @@ void updateState(GLfloat dt){
                     parDP[sphereIndex][j] = boundsL[j] - parAux[sphereIndex][j];
                 }
             }
-        }
+        }*/
 
-        for (int sphereIndex = to!int(sphereIndices.length - 1); sphereIndex >= 0; sphereIndex--)
-        {
-            for (int j = 0; j < VECTOR_SIZE; j++){
-                parAux[sphereIndex][j] = parDP[sphereIndex][j] + parAux[sphereIndex][j];
-            }
-        }
+        // Apply changes
+        applyDP(parAux, parDP);
+
+        boundPositions(parAux);
     }
 
-    for (int sphereIndex = to!int(sphereIndices.length - 1); sphereIndex >= 0; sphereIndex--)
+    int[][] neighbours = new int[][](to!int(sphereIndices.length)); // Current particle neighbours
+    int[VECTOR_SIZE] binDims;
+    setBinDims(binDims);
+    int[][][][] bins = new int[][][][](binDims[0], binDims[1], binDims[2]);
+    int[VECTOR_SIZE][] parBin = new int[VECTOR_SIZE][](to!int(sphereIndices.length)); // Current particle bin
+    assignBins(binDims, bins, parAux, parBin);// Assign bins
+    assignNeighbours(binDims, bins, parAux, parBin, neighbours);// Assign neighbours
+
+    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
     {
         for (int j = 0; j < VECTOR_SIZE; j++){
             parVel[sphereIndex][j] = (parAux[sphereIndex][j] - parPos[sphereIndex][j])/dt;
         }
+
         parPos[sphereIndex] = parAux[sphereIndex];
     }
 
+    GLfloat[VECTOR_SIZE][] parVelAux = new GLfloat[VECTOR_SIZE][](to!int(sphereIndices.length)); // Auxiliary particle velocities
+
+    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+    {
+        for (int j = 0; j < VECTOR_SIZE; j++){
+            parVelAux[sphereIndex][j] = parVel[sphereIndex][j];
+        }
+    }
+
+    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+    {
+        //Apply vorticity
+        GLfloat[VECTOR_SIZE] fVor;
+        GLfloat[VECTOR_SIZE] omega = [0, 0, 0];
+        GLfloat[VECTOR_SIZE] bigN = [0, 0, 0];
+        GLfloat[VECTOR_SIZE][VECTOR_SIZE] crossDerivs = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+        for (int neighIndex = to!int(neighbours[sphereIndex].length) - 1; neighIndex >= 0; neighIndex--)
+        {
+            GLfloat[VECTOR_SIZE] velDiff = subtract(parVel[sphereIndex], parVel[neighbours[sphereIndex][neighIndex]]);
+            GLfloat[VECTOR_SIZE] summand = crossProduct(velDiff,
+                dbIKGauss(subtract(parPos[sphereIndex], parPos[neighbours[sphereIndex][neighIndex]]), h));
+            omega = add(omega, summand);
+
+            GLfloat[VECTOR_SIZE][VECTOR_SIZE] derivs = dadbIKGauss(subtract(parPos[sphereIndex], parPos[neighbours[sphereIndex][neighIndex]]), h);
+
+            for (int j = 0; j < VECTOR_SIZE; j++){
+                for (int k = 0; k < VECTOR_SIZE; k++){
+                    crossDerivs[j][k] += velDiff[(k+1)%VECTOR_SIZE] * derivs[j][(k+2)%VECTOR_SIZE] - velDiff[(k+2)%VECTOR_SIZE] * derivs[j][(k+1)%VECTOR_SIZE];
+                }
+            }
+        }
+
+        // Njk based on index j in p with index k in omega
+        for (int j = 0; j < VECTOR_SIZE; j++){
+            for (int k = 0; k < VECTOR_SIZE; k++){
+                bigN[j] += omega[k] * crossDerivs[j][k];
+            }
+        }
+
+        // We skip dividing bigN by the distance of omega, since we normalize anyway
+        if(distance(bigN) != 0){
+            normalize(bigN);
+        }
+        crossProduct(bigN, omega, fVor);
+
+        for (int j = 0; j < VECTOR_SIZE; j++){
+            fVor[j] *= eps;
+        }
+
+        //Apply viscocity
+        GLfloat[VECTOR_SIZE] resVis = [0, 0, 0];
+        for (int neighIndex = to!int(neighbours[sphereIndex].length) - 1; neighIndex >= 0; neighIndex--)
+        {
+            GLfloat kernelScale = IKGaussFromDist(distance(subtract(parVel[sphereIndex], parVel[neighbours[sphereIndex][neighIndex]])), h);
+            for (int j = 0; j < VECTOR_SIZE; j++){
+                resVis[j] += kernelScale * (parVel[neighbours[sphereIndex][neighIndex]][j] - parVel[sphereIndex][j]);
+            }
+        }
+
+        // Apply velocity adjustment
+        for (int j = 0; j < VECTOR_SIZE; j++){
+            parVelAux[sphereIndex][j] += cScale*resVis[j] + fVor[j]*dt;
+        }
+    }
+
+    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+    {
+        // Apply velocity adjustment
+        for (int j = 0; j < VECTOR_SIZE; j++){
+            parVel[sphereIndex][j] = parVelAux[sphereIndex][j];
+        }
+    }
 }
 
 // Creates a new particle from position p
@@ -476,9 +642,7 @@ void main() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Tests
-  writeln(daIKGauss([0,0,1],h));
-  writeln("end tests");
-
+////////////
 
   GLfloat[VECTOR_SIZE] movementVector = [0,0,0];
   glUseProgram(shaderProgram);
@@ -530,9 +694,8 @@ void main() {
         updateState(1.0/cast(GLfloat) fps);
 
         if(iter%(4*fps) == 0){
-              createParticle([uniform(-0.1, 0.1),0.5,uniform(-0.1, 0.1)], vaoIndex);
+              createParticle([uniform(-0.1, 0.1),boundsU[1],uniform(-0.1, 0.1)], vaoIndex);
               vaoIndex++;
-              writeln(vaoIndex);
         }
 
         iter++;
@@ -572,6 +735,7 @@ void main() {
       glfwSetWindowShouldClose(window, GL_TRUE);
   }
 
+  writeln(vaoIndex);
   glDeleteProgram(shaderProgram);
   glDeleteShader(fragmentShader);
   glDeleteShader(vertexShader);
