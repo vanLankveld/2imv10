@@ -346,6 +346,96 @@ void applyDP(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[VECTOR_SIZE][] parDP
         }
 }
 
+void applyPosChanges(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat dt){
+    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+    {
+        for (int j = 0; j < VECTOR_SIZE; j++){
+            parVel[sphereIndex][j] = (parAux[sphereIndex][j] - parPos[sphereIndex][j])/dt;
+        }
+
+        parPos[sphereIndex] = parAux[sphereIndex];
+    }
+}
+
+void calculateVorticity(ref GLfloat[VECTOR_SIZE][] parVelAux, ref int[][] neighbours, ref GLfloat dt){
+    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+    {
+        //Apply vorticity
+        GLfloat[VECTOR_SIZE] fVor;
+        GLfloat[VECTOR_SIZE] omega = [0, 0, 0];
+        GLfloat[VECTOR_SIZE] bigN = [0, 0, 0];
+        GLfloat[VECTOR_SIZE][VECTOR_SIZE] crossDerivs = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+        for (int neighIndex = to!int(neighbours[sphereIndex].length) - 1; neighIndex >= 0; neighIndex--)
+        {
+            GLfloat[VECTOR_SIZE] velDiff = subtract(parVel[sphereIndex], parVel[neighbours[sphereIndex][neighIndex]]);
+            GLfloat[VECTOR_SIZE] summand = crossProduct(velDiff,
+                dbIKGauss(subtract(parPos[sphereIndex], parPos[neighbours[sphereIndex][neighIndex]]), h));
+            omega = add(omega, summand);
+
+            GLfloat[VECTOR_SIZE][VECTOR_SIZE] derivs = dadbIKGauss(subtract(parPos[sphereIndex], parPos[neighbours[sphereIndex][neighIndex]]), h);
+
+            for (int j = 0; j < VECTOR_SIZE; j++){
+                for (int k = 0; k < VECTOR_SIZE; k++){
+                    crossDerivs[j][k] += velDiff[(k+1)%VECTOR_SIZE] * derivs[j][(k+2)%VECTOR_SIZE] - velDiff[(k+2)%VECTOR_SIZE] * derivs[j][(k+1)%VECTOR_SIZE];
+                }
+            }
+        }
+
+        // Njk based on index j in p with index k in omega
+        for (int j = 0; j < VECTOR_SIZE; j++){
+            for (int k = 0; k < VECTOR_SIZE; k++){
+                bigN[j] += omega[k] * crossDerivs[j][k];
+            }
+        }
+
+        // We skip dividing bigN by the distance of omega, since we normalize anyway
+        if(distance(bigN) != 0){
+            normalize(bigN);
+        }
+        crossProduct(bigN, omega, fVor);
+
+        for (int j = 0; j < VECTOR_SIZE; j++){
+            fVor[j] *= eps;
+        }
+
+        // Apply velocity adjustment
+        for (int j = 0; j < VECTOR_SIZE; j++){
+            parVelAux[sphereIndex][j] += fVor[j]*dt;
+        }
+    }
+}
+
+void calculateViscocity(ref GLfloat[VECTOR_SIZE][] parVelAux, ref int[][] neighbours){
+    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+    {
+
+        //Apply viscocity
+        GLfloat[VECTOR_SIZE] resVis = [0, 0, 0];
+        for (int neighIndex = to!int(neighbours[sphereIndex].length) - 1; neighIndex >= 0; neighIndex--)
+        {
+            GLfloat kernelScale = IKGaussFromDist(distance(subtract(parVel[sphereIndex], parVel[neighbours[sphereIndex][neighIndex]])), h);
+            for (int j = 0; j < VECTOR_SIZE; j++){
+                resVis[j] += kernelScale * (parVel[neighbours[sphereIndex][neighIndex]][j] - parVel[sphereIndex][j]);
+            }
+        }
+
+        // Apply velocity adjustment
+        for (int j = 0; j < VECTOR_SIZE; j++){
+            parVelAux[sphereIndex][j] += cScale*resVis[j];
+        }
+    }
+}
+
+void applyVelChanges(ref GLfloat[VECTOR_SIZE][] parVelAux){
+    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+    {
+        // Apply velocity adjustment
+        for (int j = 0; j < VECTOR_SIZE; j++){
+            parVel[sphereIndex][j] = parVelAux[sphereIndex][j];
+        }
+    }
+}
+
 // Updates the state of particles for a time difference dt
 void updateState(GLfloat dt){
     GLfloat[VECTOR_SIZE][] parAux = new GLfloat[VECTOR_SIZE][](to!int(sphereIndices.length)); // Auxiliary particle positions
@@ -391,6 +481,8 @@ void updateState(GLfloat dt){
         boundPositions(parAux);
     }
 
+    applyPosChanges(parAux, dt);
+
     int[][] neighbours = new int[][](to!int(sphereIndices.length)); // Current particle neighbours
     int[VECTOR_SIZE] binDims;
     setBinDims(binDims);
@@ -398,15 +490,6 @@ void updateState(GLfloat dt){
     int[VECTOR_SIZE][] parBin = new int[VECTOR_SIZE][](to!int(sphereIndices.length)); // Current particle bin
     assignBins(binDims, bins, parAux, parBin);// Assign bins
     assignNeighbours(binDims, bins, parAux, parBin, neighbours);// Assign neighbours
-
-    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
-    {
-        for (int j = 0; j < VECTOR_SIZE; j++){
-            parVel[sphereIndex][j] = (parAux[sphereIndex][j] - parPos[sphereIndex][j])/dt;
-        }
-
-        parPos[sphereIndex] = parAux[sphereIndex];
-    }
 
     GLfloat[VECTOR_SIZE][] parVelAux = new GLfloat[VECTOR_SIZE][](to!int(sphereIndices.length)); // Auxiliary particle velocities
 
@@ -417,69 +500,11 @@ void updateState(GLfloat dt){
         }
     }
 
-    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
-    {
-        //Apply vorticity
-        GLfloat[VECTOR_SIZE] fVor;
-        GLfloat[VECTOR_SIZE] omega = [0, 0, 0];
-        GLfloat[VECTOR_SIZE] bigN = [0, 0, 0];
-        GLfloat[VECTOR_SIZE][VECTOR_SIZE] crossDerivs = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
-        for (int neighIndex = to!int(neighbours[sphereIndex].length) - 1; neighIndex >= 0; neighIndex--)
-        {
-            GLfloat[VECTOR_SIZE] velDiff = subtract(parVel[sphereIndex], parVel[neighbours[sphereIndex][neighIndex]]);
-            GLfloat[VECTOR_SIZE] summand = crossProduct(velDiff,
-                dbIKGauss(subtract(parPos[sphereIndex], parPos[neighbours[sphereIndex][neighIndex]]), h));
-            omega = add(omega, summand);
+    calculateVorticity(parVelAux, neighbours, dt);
 
-            GLfloat[VECTOR_SIZE][VECTOR_SIZE] derivs = dadbIKGauss(subtract(parPos[sphereIndex], parPos[neighbours[sphereIndex][neighIndex]]), h);
+    calculateViscocity(parVelAux, neighbours);
 
-            for (int j = 0; j < VECTOR_SIZE; j++){
-                for (int k = 0; k < VECTOR_SIZE; k++){
-                    crossDerivs[j][k] += velDiff[(k+1)%VECTOR_SIZE] * derivs[j][(k+2)%VECTOR_SIZE] - velDiff[(k+2)%VECTOR_SIZE] * derivs[j][(k+1)%VECTOR_SIZE];
-                }
-            }
-        }
-
-        // Njk based on index j in p with index k in omega
-        for (int j = 0; j < VECTOR_SIZE; j++){
-            for (int k = 0; k < VECTOR_SIZE; k++){
-                bigN[j] += omega[k] * crossDerivs[j][k];
-            }
-        }
-
-        // We skip dividing bigN by the distance of omega, since we normalize anyway
-        if(distance(bigN) != 0){
-            normalize(bigN);
-        }
-        crossProduct(bigN, omega, fVor);
-
-        for (int j = 0; j < VECTOR_SIZE; j++){
-            fVor[j] *= eps;
-        }
-
-        //Apply viscocity
-        GLfloat[VECTOR_SIZE] resVis = [0, 0, 0];
-        for (int neighIndex = to!int(neighbours[sphereIndex].length) - 1; neighIndex >= 0; neighIndex--)
-        {
-            GLfloat kernelScale = IKGaussFromDist(distance(subtract(parVel[sphereIndex], parVel[neighbours[sphereIndex][neighIndex]])), h);
-            for (int j = 0; j < VECTOR_SIZE; j++){
-                resVis[j] += kernelScale * (parVel[neighbours[sphereIndex][neighIndex]][j] - parVel[sphereIndex][j]);
-            }
-        }
-
-        // Apply velocity adjustment
-        for (int j = 0; j < VECTOR_SIZE; j++){
-            parVelAux[sphereIndex][j] += cScale*resVis[j] + fVor[j]*dt;
-        }
-    }
-
-    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
-    {
-        // Apply velocity adjustment
-        for (int j = 0; j < VECTOR_SIZE; j++){
-            parVel[sphereIndex][j] = parVelAux[sphereIndex][j];
-        }
-    }
+    applyVelChanges(parVelAux);
 }
 
 // Creates a new particle from position p
