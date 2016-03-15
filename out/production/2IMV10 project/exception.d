@@ -1,6 +1,6 @@
 module mfellner.exception;
 
-import core.stdc.stdio : fputs, fputc, stderr;
+import core.stdc.stdio : fputs, fputc, stderr, printf;
 import derelict.opengl3.gl3;
 
 extern(C) nothrow void glfwPrintError(int error, const(char)* description) {
@@ -9,7 +9,9 @@ extern(C) nothrow void glfwPrintError(int error, const(char)* description) {
 }
 
 void glCheckError() {
-  if (glGetError() != GL_NO_ERROR) {
+  GLuint errorCode = glGetError();
+  if (errorCode != GL_NO_ERROR) {
+     printf("OpenGL Error code %#08x\n", errorCode);
      throw new Exception("OpenGL encountered an error!");
   }
 }

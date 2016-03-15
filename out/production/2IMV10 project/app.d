@@ -9,6 +9,7 @@ import std.random;
 import derelict.opengl3.gl3;
 import derelict.glfw3.glfw3;
 import gl3n.linalg;
+import _2imv10.shaderUtil;
 import _2imv10.sphere;
 import _2imv10.text;
 
@@ -90,55 +91,6 @@ bool wIsDown = false;
 bool aIsDown = false;
 bool sIsDown = false;
 bool dIsDown = false;
-
-void printProgramInfoLog(GLuint program) {
-  GLint infologLength = 0;
-  GLint charsWritten  = 0;
-
-  glGetProgramiv(program, GL_INFO_LOG_LENGTH, &infologLength);
-
-  if (infologLength > 0) {
-    char[] infoLog;
-    //glGetProgramInfoLog(program, infologLength, &charsWritten, infoLog.ptr);
-    //Generates errors for Leo
-    writeln(infoLog);
-  } else {
-    writeln("no program info log");
-  }
-}
-
-string loadShader(string filename) {
-  if (exists(filename) != 0) {
-    return readText(filename);
-  } else {
-    throw new Exception("Shader file not found");
-  }
-}
-
-GLuint compileShader(string filename, GLuint type) {
-  const(char)* sp = loadShader(filename).toStringz();
-
-  GLuint shader = glCreateShader(type);
-  glShaderSource(shader, 1, &sp, null);
-  glCompileShader(shader);
-
-  GLint status;
-  glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
-  if (status != GL_TRUE) {
-    throw new Exception("Failed to compile shader");
-  }
-
-  GLint infologLength;
-  glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infologLength);
-  if (infologLength > 0) {
-    char[] buffer = new char[infologLength];
-    glGetShaderInfoLog(shader, infologLength, null, buffer.ptr);
-    writeln(buffer);
-  } else {
-    writeln("no shader info log");
-  }
-  return shader;
-}
 
 nothrow void buildProjectionMatrix(GLfloat fov, GLfloat ratio, GLfloat nearP, GLfloat farP) {
   GLfloat f = 1.0 / tan (fov * (PI / 360.0));
@@ -318,9 +270,9 @@ void main() {
     DerelictGL3.load();
     DerelictGLFW3.load();
 
-    glfwSetErrorCallback(&glfwPrintError);
+    initTextLibs();
 
-    initTextRendering();
+    glfwSetErrorCallback(&glfwPrintError);
 
     if(!glfwInit())
     {
@@ -330,8 +282,9 @@ void main() {
 
     glfwWindowHint(GLFW_SAMPLES, 4);
     glfwWindowHint(GLFW_RESIZABLE, GL_TRUE);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
@@ -390,6 +343,8 @@ void main() {
     lightIntensitiesLoc = glGetUniformLocation(shaderProgram, "lightIntensities");
     lightAmbientLoc = glGetUniformLocation(shaderProgram, "lightAmbient");
     glCheckError();
+
+    GLuint textShaderProgram = initTextRendering();
 
     GLuint[2] vbo;
     GLuint nbo;
@@ -477,6 +432,7 @@ void main() {
   int iter = 0;
 
   while (!glfwWindowShouldClose(window)) {
+    glUseProgram(shaderProgram);
     glClearColor(0.0, 0.0, 0.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -564,6 +520,17 @@ void main() {
     glBindVertexArray(vao[0]);
     glDrawArrays(GL_LINES, 0, 6);
 
+    glUseProgram(textShaderProgram);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glfwGetWindowSize(window, &width, &height);
+
+	float sx = 2.0 / width;
+    float sy = 2.0 / height;
+
+    render_text("Hello", 0,0,sx,sy);
+    glCheckError();
     glfwSwapBuffers(window);
     glfwPollEvents();
 
@@ -580,17 +547,6 @@ void main() {
 
   glfwDestroyWindow(window);
   glfwTerminate();
-}
-
-void drawBitmapText(char *string, float x, float y, float z)
-{
-/*    char *c;
-    glRasterPos3f(x, y, z);
-
-    for (c=string; *c != '\0'; c++)
-    {
-        glutBitmapCharacter(GLUT_BITMAP_TIMES_ROMAN_10, *c);
-    }*/
 }
 
 extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)

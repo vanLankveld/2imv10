@@ -6,6 +6,7 @@
 	"dependencies": {
 		"derelict-gl3": "~master",
 		"derelict-glfw3": "~master",
-		"gl3n": "~master"
+		"gl3n": "~master",
+		"derelict-ft": "~master"
 	}
 }
