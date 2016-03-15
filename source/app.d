@@ -10,6 +10,7 @@ import derelict.opengl3.gl3;
 import derelict.glfw3.glfw3;
 import gl3n.linalg;
 import _2imv10.sphere;
+import _2imv10.text;
 
 import mfellner.exception;
 import mfellner.math;
@@ -319,6 +320,8 @@ void main() {
 
     glfwSetErrorCallback(&glfwPrintError);
 
+    initTextRendering();
+
     if(!glfwInit())
     {
         glfwTerminate();
@@ -577,6 +580,17 @@ void main() {
 
   glfwDestroyWindow(window);
   glfwTerminate();
+}
+
+void drawBitmapText(char *string, float x, float y, float z)
+{
+/*    char *c;
+    glRasterPos3f(x, y, z);
+
+    for (c=string; *c != '\0'; c++)
+    {
+        glutBitmapCharacter(GLUT_BITMAP_TIMES_ROMAN_10, *c);
+    }*/
 }
 
 extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
