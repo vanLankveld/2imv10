@@ -680,9 +680,14 @@ void main() {
 
   StopWatch sw;
 
+  long totalUpdateTime = 0;
+  long totalRenderTime = 0;
+  long frames = 0;
+
+  TickDuration framesStart = sw.peek();
+  sw.start();
   while (!glfwWindowShouldClose(window)) {
-    TickDuration frameStart = sw.peek();
-    sw.start();
+    frames++;
     glClearColor(0.0, 0.0, 0.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -732,6 +737,7 @@ void main() {
         iter++;
     }
     TickDuration endUpdate = sw.peek()-startUpdate;
+    totalUpdateTime += endUpdate.msecs;
 
     GLfloat[] offsets;
     TickDuration startRender = sw.peek();
@@ -772,22 +778,29 @@ void main() {
     glDrawArrays(GL_LINES, 0, 6);
 
     TickDuration endRender = sw.peek()-startRender;
+    totalRenderTime = endRender.usecs;
 
     glfwSwapBuffers(window);
     glfwPollEvents();
-    sw.stop();
-    TickDuration frameEnd = sw.peek()-frameStart;
-    float frameRate = 1000f/frameEnd.msecs;
 
     if(checkExecutionTime)
-        {
-            checkExecutionTime = false;
-            printf("%d,%d,%.4f\n", endUpdate.msecs, endRender.msecs, frameRate);
-        }
+    {
+        TickDuration frameEnd = sw.peek()-framesStart;
+        checkExecutionTime = false;
+        float avgUpdateTime = cast(float)totalUpdateTime/cast(float)frames;
+        float avgRenderTime = cast(float)totalRenderTime/cast(float)frames;
+        float avgFrameRate = cast(float)frames/(cast(float)frameEnd.msecs/1000);
+
+        printf("%f,%f,%f\n", avgUpdateTime, avgRenderTime, avgFrameRate);
+        frames = 0;
+        framesStart = sw.peek();
+    }
 
     if (fullscreen && glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
       glfwSetWindowShouldClose(window, GL_TRUE);
   }
+
+  sw.stop();
 
   glDeleteProgram(shaderProgram);
   glDeleteShader(fragmentShader);
