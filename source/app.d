@@ -5,6 +5,7 @@ import std.stdio;
 import std.range;
 import std.string;
 import std.random;
+import std.datetime;
 
 import derelict.opengl3.gl3;
 import derelict.glfw3.glfw3;
@@ -91,6 +92,8 @@ bool wIsDown = false;
 bool aIsDown = false;
 bool sIsDown = false;
 bool dIsDown = false;
+
+bool checkExecutionTime = false;
 
 void printProgramInfoLog(GLuint program) {
   GLint infologLength = 0;
@@ -512,6 +515,7 @@ void createParticle(GLfloat[VECTOR_SIZE] p, int vaoIndex){
     sphereIndices ~= vaoIndex;
     parPos ~= p;
     parVel ~= [0,0,0];
+    checkExecutionTime = true;
 }
 
 // adapted from http://open.gl/drawing and
@@ -656,7 +660,7 @@ void main() {
     vertices = gVaA[0];
     sphereVertexCount = vertices.length;
 
-    writeln(sphereVertexCount * vaoIndex-1);
+    //writeln(sphereVertexCount * vaoIndex-1);
 
   int i = 0, k = 1;
   uint frame = 0;
@@ -674,7 +678,11 @@ void main() {
 
   int iter = 0;
 
+  StopWatch sw;
+
   while (!glfwWindowShouldClose(window)) {
+    TickDuration frameStart = sw.peek();
+    sw.start();
     glClearColor(0.0, 0.0, 0.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -712,6 +720,7 @@ void main() {
 
     //////////////////////////////////////////////////////////////////////////////
     // Update the points
+    TickDuration startUpdate = sw.peek();
     for (int u = 0; u < numUpdates; u++){
         updateState(1.0/cast(GLfloat) fps);
 
@@ -722,9 +731,10 @@ void main() {
 
         iter++;
     }
+    TickDuration endUpdate = sw.peek()-startUpdate;
 
     GLfloat[] offsets;
-
+    TickDuration startRender = sw.peek();
     for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
     {
         offsets ~= [parPos[sphereIndex][0], parPos[sphereIndex][1], parPos[sphereIndex][2], 1.0];
@@ -761,15 +771,24 @@ void main() {
     glBindVertexArray(vao[0]);
     glDrawArrays(GL_LINES, 0, 6);
 
+    TickDuration endRender = sw.peek()-startRender;
+
     glfwSwapBuffers(window);
     glfwPollEvents();
+    sw.stop();
+    TickDuration frameEnd = sw.peek()-frameStart;
+    float frameRate = 1000f/frameEnd.msecs;
 
+    if(checkExecutionTime)
+        {
+            checkExecutionTime = false;
+            printf("%d,%d,%.4f\n", endUpdate.msecs, endRender.msecs, frameRate);
+        }
 
     if (fullscreen && glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
       glfwSetWindowShouldClose(window, GL_TRUE);
   }
 
-  writeln(vaoIndex);
   glDeleteProgram(shaderProgram);
   glDeleteShader(fragmentShader);
   glDeleteShader(vertexShader);
