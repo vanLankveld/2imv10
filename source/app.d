@@ -5,7 +5,11 @@ import std.stdio;
 import std.range;
 import std.string;
 import std.random;
+
 import std.parallelism;
+
+import std.datetime;
+
 
 import derelict.opengl3.gl3;
 import derelict.glfw3.glfw3;
@@ -101,6 +105,8 @@ bool fIsDown = false;
 bool gIsDown = false;
 
 bool bIsDown = false;
+
+bool checkExecutionTime = false;
 
 void printProgramInfoLog(GLuint program) {
   GLint infologLength = 0;
@@ -517,6 +523,7 @@ void createParticle(GLfloat[VECTOR_SIZE] p, int vaoIndex){
     sphereIndices ~= vaoIndex;
     parPos ~= p;
     parVel ~= [0,0,0];
+    checkExecutionTime = true;
 }
 
 // Creates a new faucet from position p
@@ -666,7 +673,7 @@ void main() {
     vertices = gVaA[0];
     sphereVertexCount = vertices.length;
 
-    writeln(sphereVertexCount * vaoIndex-1);
+    //writeln(sphereVertexCount * vaoIndex-1);
 
   int i = 0, k = 1;
   uint frame = 0;
@@ -695,7 +702,17 @@ void main() {
 
   int faucetCounter = 0;
 
+  StopWatch sw;
+
+  long totalUpdateTime = 0;
+  long totalRenderTime = 0;
+  long frames = 0;
+
+  TickDuration framesStart = sw.peek();
+  sw.start();
+
   while (!glfwWindowShouldClose(window)) {
+    frames++;
     glClearColor(0.0, 0.0, 0.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -747,6 +764,7 @@ void main() {
 
     //////////////////////////////////////////////////////////////////////////////
     // Update the points
+    TickDuration startUpdate = sw.peek();
     for (int u = 0; u < numUpdates; u++){
         updateState(1.0/cast(GLfloat) fps);
 
@@ -760,9 +778,11 @@ void main() {
 
         iter++;
     }
+    TickDuration endUpdate = sw.peek()-startUpdate;
+    totalUpdateTime += endUpdate.msecs;
 
     GLfloat[] offsets;
-
+    TickDuration startRender = sw.peek();
     for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
     {
         offsets ~= [parPos[sphereIndex][0], parPos[sphereIndex][1], parPos[sphereIndex][2], 1.0];
@@ -799,9 +819,24 @@ void main() {
     glBindVertexArray(vao[0]);
     glDrawArrays(GL_LINES, 0, 6);
 
+    TickDuration endRender = sw.peek()-startRender;
+    totalRenderTime = endRender.usecs;
+
     glfwSwapBuffers(window);
     glfwPollEvents();
 
+    if(checkExecutionTime)
+    {
+        TickDuration frameEnd = sw.peek()-framesStart;
+        checkExecutionTime = false;
+        float avgUpdateTime = cast(float)totalUpdateTime/cast(float)frames;
+        float avgRenderTime = cast(float)totalRenderTime/cast(float)frames;
+        float avgFrameRate = cast(float)frames/(cast(float)frameEnd.msecs/1000);
+
+        printf("%f,%f,%f\n", avgUpdateTime, avgRenderTime, avgFrameRate);
+        frames = 0;
+        framesStart = sw.peek();
+    }
 
     if (fullscreen && glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
       glfwSetWindowShouldClose(window, GL_TRUE);
@@ -809,6 +844,8 @@ void main() {
 
   writeln(faucetCounter);
   writeln(vaoIndex);
+  sw.stop();
+
   glDeleteProgram(shaderProgram);
   glDeleteShader(fragmentShader);
   glDeleteShader(vertexShader);
