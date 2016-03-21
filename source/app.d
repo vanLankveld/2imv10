@@ -58,6 +58,7 @@ ulong sphereVertexCount;
 //Bounds
 GLfloat[VECTOR_SIZE] boundsU = [9.5,4.5,9.5];
 GLfloat[VECTOR_SIZE] boundsL = [-9.5,-7.5,-9.5];
+GLfloat secondBottom = -9.5;
 
 //Faucets
 GLfloat[VECTOR_SIZE][] faucets;
@@ -95,6 +96,11 @@ bool wIsDown = false;
 bool aIsDown = false;
 bool sIsDown = false;
 bool dIsDown = false;
+
+bool fIsDown = false;
+bool gIsDown = false;
+
+bool bIsDown = false;
 
 void printProgramInfoLog(GLuint program) {
   GLint infologLength = 0;
@@ -642,13 +648,13 @@ void main() {
 
     for (int i = 0; i < spheresX; i++)
     {
-      GLfloat cX = 0.2 * i + uniform(0.0, 0.15);
+      GLfloat cX = 2.0 * i + uniform(0.0, 0.15);
       for (int j = 0; j < spheresY; j++)
       {
-          GLfloat cY = 0.2 * j + uniform(0.0, 0.15);
+          GLfloat cY = 2.0 * j + uniform(0.0, 0.15);
           for (int k = 0; k < spheresZ; k++)
           {
-              GLfloat cZ = 0.2 * k + uniform(0.0, 0.15);
+              GLfloat cZ = 2.0 * k + uniform(0.0, 0.15);
               GLfloat[VECTOR_SIZE] center = [cX, cY, cZ];
               createParticle(center, vaoIndex);
               vaoIndex++;
@@ -673,8 +679,8 @@ void main() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Initialize rain
-  for (int v = -7; v <= 7; v+=2){
-    for (int w = -7; w <= 7; w +=2){
+  for (int v = to!int(ceil(boundsL[0]))+1; v <= to!int(floor(boundsU[0]))-1; v+=2){
+    for (int w = to!int(ceil(boundsL[2]))+1; w <= to!int(floor(boundsU[2]))-1; w +=2){
         createFaucet([v,4,w]);
     }
   }
@@ -687,9 +693,13 @@ void main() {
 
   int iter = 0;
 
+  int faucetCounter = 0;
+
   while (!glfwWindowShouldClose(window)) {
     glClearColor(0.0, 0.0, 0.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+
 
     movementVector = [0,0,0];
 
@@ -713,6 +723,18 @@ void main() {
         GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 3, walkStepSize);
         add(movementVector, dMovementVector, movementVector);
     }
+    if(fIsDown)
+    {
+        faucetCounter++;
+    }
+    if(gIsDown)
+    {
+        faucetCounter--;
+    }
+    if(bIsDown)
+    {
+        //Do some splashing stuff
+    }
 
     lookatX += movementVector[0];
     lookatZ += movementVector[1];
@@ -728,7 +750,7 @@ void main() {
     for (int u = 0; u < numUpdates; u++){
         updateState(1.0/cast(GLfloat) fps);
 
-        for (int w = 0; w < faucets.length; w++){
+        for (int w = 0; w < faucets.length && w < faucetCounter; w++){
 
             if((iter+w*4)%(4*fps) == 0){
               createParticle([uniform(-0.1, 0.1) + faucets[w][0],uniform(-0.1, 0.1) + faucets[w][1],uniform(-0.1, 0.1) + faucets[w][2]], vaoIndex);
@@ -785,6 +807,7 @@ void main() {
       glfwSetWindowShouldClose(window, GL_TRUE);
   }
 
+  writeln(faucetCounter);
   writeln(vaoIndex);
   glDeleteProgram(shaderProgram);
   glDeleteShader(fragmentShader);
@@ -799,7 +822,8 @@ void main() {
 extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
 
-    if ((action != 1 && action != 0) || (key != GLFW_KEY_W && key != GLFW_KEY_A && key != GLFW_KEY_S && key != GLFW_KEY_D))
+    if ((action != 1 && action != 0) || (key != GLFW_KEY_W && key != GLFW_KEY_A && key != GLFW_KEY_S && key != GLFW_KEY_D
+            && key != GLFW_KEY_F && key != GLFW_KEY_G && key != GLFW_KEY_B))
     {
         return;
     }
@@ -821,6 +845,15 @@ extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, i
                 break;
             case GLFW_KEY_D:
                 dIsDown = action == 1;
+                break;
+            case GLFW_KEY_F:
+                fIsDown = action == 1;
+                break;
+            case GLFW_KEY_G:
+                gIsDown = action == 1;
+                break;
+            case GLFW_KEY_B:
+                bIsDown = action == 1;
                 break;
             default:
                 break;
