@@ -5,6 +5,7 @@ import std.stdio;
 import std.range;
 import std.string;
 import std.random;
+import std.parallelism;
 
 import derelict.opengl3.gl3;
 import derelict.glfw3.glfw3;
@@ -48,15 +49,18 @@ GLfloat kScale = 0.1; // Scalar for that stuff
 GLfloat cScale = 0.01; // Scalar for viscocity
 
 int solveIter = 3; // Number of corrective calculation cycles
-int numUpdates = 5; // Number of updates per frame
+int numUpdates = 2; // Number of updates per frame
 
 int fps = 15; //Number of frames per second
 
 ulong sphereVertexCount;
 
 //Bounds
-GLfloat[VECTOR_SIZE] boundsU = [3.5,3.5,3.5];
-GLfloat[VECTOR_SIZE] boundsL = [-1.5,-3.5,-1.5];
+GLfloat[VECTOR_SIZE] boundsU = [9.5,4.5,9.5];
+GLfloat[VECTOR_SIZE] boundsL = [-9.5,-7.5,-9.5];
+
+//Faucets
+GLfloat[VECTOR_SIZE][] faucets;
 
 //Camera position
 GLfloat lookatX = 0;
@@ -101,7 +105,7 @@ void printProgramInfoLog(GLuint program) {
   if (infologLength > 0) {
     char[] infoLog;
     //glGetProgramInfoLog(program, infologLength, &charsWritten, infoLog.ptr);
-    //Generates errors for Leo
+    //Still causes exit with code -11
     writeln(infoLog);
   } else {
     writeln("no program info log");
@@ -214,7 +218,7 @@ void setCamera(GLfloat posX, GLfloat posY, GLfloat posZ, GLfloat lookAtX, GLfloa
 void predictPositions(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat dt){
     for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
         {
-            parVel[sphereIndex] = [parVel[sphereIndex][0], parVel[sphereIndex][1] - g*dt, parVel[sphereIndex][2]];
+            parVel[sphereIndex][1] -= g*dt;
             for (int j = 0; j < VECTOR_SIZE; j++){
                 parAux[sphereIndex][j] = parPos[sphereIndex][j] + parVel[sphereIndex][j]*dt;
             }
@@ -222,9 +226,7 @@ void predictPositions(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat dt){
 }
 
 void boundPositions(ref GLfloat[VECTOR_SIZE][] parAux){
-
-        for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
-        {
+    foreach (sphereIndex; taskPool.parallel(iota(0,to!int(sphereIndices.length)))){
             //Collision detection with aquarium (faulty)
             for (int j = 0; j < 3; j++){
                 if(parAux[sphereIndex][j] > boundsU[j]){
@@ -233,7 +235,7 @@ void boundPositions(ref GLfloat[VECTOR_SIZE][] parAux){
                     parAux[sphereIndex][j] = boundsL[j];
                 }
             }
-        }
+    }
 }
 
 void setBinDims(ref int[VECTOR_SIZE] binDims){
@@ -259,8 +261,8 @@ void assignBins(ref int[VECTOR_SIZE] binDims, ref int[][][][] bins, ref GLfloat[
 }
 
 void assignNeighbours(ref int[VECTOR_SIZE] binDims, ref int[][][][] bins, ref GLfloat[VECTOR_SIZE][] parAux, ref int[VECTOR_SIZE][] parBin, ref int[][] neighbours){
-        for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
-        {
+
+    foreach (sphereIndex; taskPool.parallel(iota(0,to!int(sphereIndices.length)))){
             int[VECTOR_SIZE] curbin = parBin[sphereIndex];
             for (int dx = -1; dx <= 1; dx++){
                 if(curbin[0] + dx >= 0 && curbin[0] + dx < binDims[0]){
@@ -282,8 +284,7 @@ void assignNeighbours(ref int[VECTOR_SIZE] binDims, ref int[][][][] bins, ref GL
 }
 
 void calculateLambdas(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[] parLam, ref int[][] neighbours){
-    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
-    {
+    foreach (sphereIndex; taskPool.parallel(iota(0,to!int(sphereIndices.length)))){
         GLfloat rhoi = 0;
         for (int neighIndex = to!int(neighbours[sphereIndex].length) - 1; neighIndex >= 0; neighIndex--)
         {
@@ -317,8 +318,7 @@ void calculateLambdas(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[] parLam, r
 }
 
 void calculateDeltaP(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[] parLam, ref GLfloat[VECTOR_SIZE][] parDP, ref int[][] neighbours){
-        for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
-        {
+    foreach (sphereIndex; taskPool.parallel(iota(0,to!int(sphereIndices.length)))){
             GLfloat[VECTOR_SIZE] dp = [0,0,0];
             for (int neighIndex = to!int(neighbours[sphereIndex].length) - 1; neighIndex >= 0; neighIndex--)
             {
@@ -338,8 +338,7 @@ void calculateDeltaP(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[] parLam, re
 }
 
 void applyDP(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[VECTOR_SIZE][] parDP){
-        for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
-        {
+    foreach (sphereIndex; taskPool.parallel(iota(0,to!int(sphereIndices.length)))){
             for (int j = 0; j < VECTOR_SIZE; j++){
                 parAux[sphereIndex][j] = parDP[sphereIndex][j] + parAux[sphereIndex][j];
             }
@@ -514,6 +513,11 @@ void createParticle(GLfloat[VECTOR_SIZE] p, int vaoIndex){
     parVel ~= [0,0,0];
 }
 
+// Creates a new faucet from position p
+void createFaucet(GLfloat[VECTOR_SIZE] p){
+    faucets ~= p;
+}
+
 // adapted from http://open.gl/drawing and
 // http://www.lighthouse3d.com/cg-topics/code-samples/opengl-3-3-glsl-1-5-sample
 void main() {
@@ -666,6 +670,15 @@ void main() {
 // Tests
 ////////////
 
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Initialize rain
+  for (int v = -7; v <= 7; v+=2){
+    for (int w = -7; w <= 7; w +=2){
+        createFaucet([v,4,w]);
+    }
+  }
+
   GLfloat[VECTOR_SIZE] movementVector = [0,0,0];
   glUseProgram(shaderProgram);
   glUniform3fv(cast(uint)lightPositionLoc, 1, cast(const(float)*)[cameraX, cameraY, cameraZ]);
@@ -715,9 +728,12 @@ void main() {
     for (int u = 0; u < numUpdates; u++){
         updateState(1.0/cast(GLfloat) fps);
 
-        if(iter%(4*fps) == 0){
-              createParticle([uniform(-0.1, 0.1),boundsU[1],uniform(-0.1, 0.1)], vaoIndex);
+        for (int w = 0; w < faucets.length; w++){
+
+            if((iter+w*4)%(4*fps) == 0){
+              createParticle([uniform(-0.1, 0.1) + faucets[w][0],uniform(-0.1, 0.1) + faucets[w][1],uniform(-0.1, 0.1) + faucets[w][2]], vaoIndex);
               vaoIndex++;
+            }
         }
 
         iter++;
