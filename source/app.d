@@ -42,7 +42,7 @@ GLfloat[] sphereColors;
 GLfloat g = 0.3; // Gravity force
 GLfloat h = 1.5; // Kernel size
 GLfloat rho = 0.0008; // Rest density
-GLfloat eps = 0.02; // Relaxation parameter
+GLfloat eps = 0.4; // Relaxation parameter
 
 GLfloat binsize = 1.0; // Size of bins for spatial partitioning, should be at least 4*h
 
@@ -53,15 +53,15 @@ GLfloat kScale = 0.1; // Scalar for that stuff
 GLfloat cScale = 0.01; // Scalar for viscocity
 
 int solveIter = 3; // Number of corrective calculation cycles
-int numUpdates = 2; // Number of updates per frame
+int numUpdates = 1; // Number of updates per frame
 
 int fps = 15; //Number of frames per second
 
 ulong sphereVertexCount;
 
 //Bounds
-GLfloat[VECTOR_SIZE] boundsU = [9.5,4.5,9.5];
-GLfloat[VECTOR_SIZE] boundsL = [-9.5,-7.5,-9.5];
+GLfloat[VECTOR_SIZE] boundsU = [7.5,11.5,7.5];
+GLfloat[VECTOR_SIZE] boundsL = [-7.5,-7.5,-7.5];
 GLfloat secondBottom = -9.5;
 
 //Faucets
@@ -686,9 +686,9 @@ void main() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Initialize rain
-  for (int v = to!int(ceil(boundsL[0]))+1; v <= to!int(floor(boundsU[0]))-1; v+=2){
-    for (int w = to!int(ceil(boundsL[2]))+1; w <= to!int(floor(boundsU[2]))-1; w +=2){
-        createFaucet([v,4,w]);
+  for (float v = to!int(ceil(boundsL[0]))+1; v <= to!int(floor(boundsU[0]))-1; v+=1.5*h){
+    for (float w = to!int(ceil(boundsL[2]))+1; w <= to!int(floor(boundsU[2]))-1; w +=1.5*h){
+        createFaucet([v,6,w]);
     }
   }
 
@@ -750,7 +750,12 @@ void main() {
     }
     if(bIsDown)
     {
-        //Do some splashing stuff
+        for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+        {
+            if(parPos[sphereIndex][0] < 1.5 && parPos[sphereIndex][0] > -1.5 && parPos[sphereIndex][2] < 1.5 && parPos[sphereIndex][2] > -1.5){
+              parPos[sphereIndex][1] = parPos[sphereIndex][1] + 15;
+            }
+        }
     }
 
     lookatX += movementVector[0];
@@ -771,7 +776,7 @@ void main() {
         for (int w = 0; w < faucets.length && w < faucetCounter; w++){
 
             if((iter+w*4)%(4*fps) == 0){
-              createParticle([uniform(-0.1, 0.1) + faucets[w][0],uniform(-0.1, 0.1) + faucets[w][1],uniform(-0.1, 0.1) + faucets[w][2]], vaoIndex);
+              createParticle([uniform(-h/10, h/10) + faucets[w][0],uniform(-h/10, h/10) + faucets[w][1],uniform(-h/10, h/10) + faucets[w][2]], vaoIndex);
               vaoIndex++;
             }
         }
