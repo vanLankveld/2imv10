@@ -838,9 +838,13 @@ void main() {
         float avgRenderTime = cast(float)totalRenderTime/cast(float)frames;
         float avgFrameRate = cast(float)frames/(cast(float)frameEnd.msecs/1000);
 
-        printf("%f,%f,%f\n", avgUpdateTime, avgRenderTime, avgFrameRate);
+        printf("%i,%f,%f,%f\n", vaoIndex, avgUpdateTime, avgRenderTime, avgFrameRate);
         frames = 0;
         framesStart = sw.peek();
+
+        const(char)* title = cast(const(char)*)("Position Based Fluids. #particles=" ~ to!string(vaoIndex));
+
+        glfwSetWindowTitle	(window, title);
     }
 
     if (fullscreen && glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)

@@ -13,6 +13,14 @@ void crossProduct(ref GLfloat[VECTOR_SIZE] a, ref GLfloat[VECTOR_SIZE] b, ref GL
   res[2] = a[0] * b[1] - b[0] * a[1];
 }
 
+GLfloat[VECTOR_SIZE] crossProduct(GLfloat[VECTOR_SIZE] a, GLfloat[VECTOR_SIZE] b) {
+  GLfloat[VECTOR_SIZE] res;
+  res[0] = a[1] * b[2] - b[1] * a[2];
+  res[1] = a[2] * b[0] - b[2] * a[0];
+  res[2] = a[0] * b[1] - b[0] * a[1];
+  return res;
+}
+
 // res = a dot b;
 GLfloat dotProduct(GLfloat[VECTOR_SIZE] a, GLfloat[VECTOR_SIZE] b) {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -35,6 +43,17 @@ void subtract(ref GLfloat[VECTOR_SIZE] a, ref GLfloat[VECTOR_SIZE] b, ref GLfloa
     result[0] = a[0] - b[0];
     result[1] = a[1] - b[1];
     result[2] = a[2] - b[2];
+}
+
+GLfloat[VECTOR_SIZE] add(GLfloat[VECTOR_SIZE] a, GLfloat[VECTOR_SIZE] b)
+{
+    GLfloat[VECTOR_SIZE] result =
+    [
+        a[0] + b[0],
+        a[1] + b[1],
+        a[2] + b[2]
+    ];
+    return result;
 }
 
 GLfloat[VECTOR_SIZE] subtract(GLfloat[VECTOR_SIZE] a, GLfloat[VECTOR_SIZE] b)
@@ -80,6 +99,17 @@ GLfloat[VECTOR_SIZE] dbIKGauss(GLfloat[VECTOR_SIZE] x, ref GLfloat h) {
 GLfloat[VECTOR_SIZE] daIKGauss(GLfloat[VECTOR_SIZE] x, ref GLfloat h) {
   GLfloat[VECTOR_SIZE] db = dbIKGauss(x,h);
   return [-db[0], -db[1], -db[2]];
+}
+
+// get the individual a-derivatives of the individual b-derivatives of the Gaussian interpolation kernel of vec3 a-b for kernel size h
+GLfloat[VECTOR_SIZE][VECTOR_SIZE] dadbIKGauss(GLfloat[VECTOR_SIZE] x, ref GLfloat h) {
+  GLfloat dist = distance(x);
+  GLfloat gauss = IKGaussFromDist(dist,h);
+  GLfloat scalarst = -4 * gauss / (h*h*h*h);
+  GLfloat scalarsame = 2 * gauss / (h*h);
+  return [[scalarsame + scalarst*x[0]*x[0], scalarst*x[0]*x[1], scalarst*x[0]*x[2]],
+    [scalarst*x[1]*x[0], scalarsame + scalarst*x[1]*x[1], scalarst*x[1]*x[2]],
+    [scalarst*x[2]*x[0], scalarst*x[2]*x[1], scalarsame + scalarst*x[2]*x[2]]];
 }
 
 // sets the square matrix mat to the identity matrix,
