@@ -15,6 +15,8 @@ import derelict.opengl3.gl3;
 import derelict.glfw3.glfw3;
 import gl3n.linalg;
 import _2imv10.sphere;
+import _2imv10.particle;
+import _2imv10.util;
 
 import mfellner.exception;
 import mfellner.math;
@@ -22,7 +24,7 @@ import mfellner.math;
 bool fullscreen = false;
 
 GLuint vertexLoc, colorLoc, normalLoc;
-GLuint projMatrixLoc, offsetLoc, viewMatrixLoc, lightIntensitiesLoc, lightPositionLoc, lightAmbientLoc;
+GLuint projMatrixLoc, offsetLoc, viewMatrixLoc, particleColorLoc, lightIntensitiesLoc, lightPositionLoc, lightAmbientLoc;
 
 GLfloat[MATRIX_SIZE] projMatrix;
 GLfloat[MATRIX_SIZE] viewMatrix;
@@ -38,6 +40,12 @@ GLfloat[][] sphereData;
 GLfloat[] sphereVertexTemplates;
 GLfloat[] sphereNormals;
 GLfloat[] sphereColors;
+
+GLuint CameraRight_worldspace_ID;
+GLuint CameraUp_worldspace_ID;
+GLuint TextureID;
+
+GLuint squareVerticesLoc, xyzsLoc;
 
 GLfloat g = 0.3; // Gravity force
 GLfloat h = 1.5; // Kernel size
@@ -78,23 +86,12 @@ GLfloat cameraZ = 4;
 
 GLfloat walkStepSize = 0.05;
 
-
-// Data for drawing Axis
-GLfloat[] verticesAxis = [
--20.0,  0.0,  0.0f, 1.0,
- 20.0,  0.0,  0.0f, 1.0,
-  0.0,-20.0,  0.0f, 1.0,
-  0.0, 20.0,  0.0f, 1.0,
-  0.0,  0.0,-20.0f, 1.0,
-  0.0,  0.0, 20.0f, 1.0];
-
-GLfloat[] colorAxis = [
-  1.0, 0.0, 0.0, 1.0,
-  1.0, 0.0, 0.0, 1.0,
-  0.0, 1.0, 0.0, 1.0,
-  0.0, 1.0, 0.0, 1.0,
-  0.0, 0.0, 1.0, 1.0,
-  0.0, 0.0, 1.0, 1.0];
+static const GLfloat[] g_vertex_buffer_data = [
+ -0.5f, -0.5f, 0.0f,
+ 0.5f, -0.5f, 0.0f,
+ -0.5f, 0.5f, 0.0f,
+ 0.5f, 0.5f, 0.0f
+];
 
 bool wIsDown = false;
 bool aIsDown = false;
@@ -139,13 +136,20 @@ GLuint compileShader(string filename, GLuint type) {
   glShaderSource(shader, 1, &sp, null);
   glCompileShader(shader);
 
+  GLint infologLength;
+
   GLint status;
   glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
-  if (status != GL_TRUE) {
+    if (status != GL_TRUE) {
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infologLength);
+        if (infologLength > 0) {
+            char[] buffer = new char[infologLength];
+            glGetShaderInfoLog(shader, infologLength, null, buffer.ptr);
+            writeln(buffer);
+        }
     throw new Exception("Failed to compile shader");
   }
 
-  GLint infologLength;
   glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infologLength);
   if (infologLength > 0) {
     char[] buffer = new char[infologLength];
@@ -178,6 +182,9 @@ extern(C) nothrow void reshape(GLFWwindow* window, int width, int height) {
 }
 
 void setUniforms() {
+    glUniform3f(CameraRight_worldspace_ID, viewMatrix[0], viewMatrix[4], viewMatrix[8]);
+    glUniform3f(CameraUp_worldspace_ID   , viewMatrix[1], viewMatrix[5], viewMatrix[9]);
+
     glUniformMatrix4fv(projMatrixLoc, 1, false, projMatrix.ptr);
     glUniformMatrix4fv(viewMatrixLoc, 1, false, viewMatrix.ptr);
 }
@@ -524,6 +531,7 @@ void createParticle(GLfloat[VECTOR_SIZE] p, int vaoIndex){
     parPos ~= p;
     parVel ~= [0,0,0];
     checkExecutionTime = true;
+    sphereColors ~= [0,0,1.0];
 }
 
 // Creates a new faucet from position p
@@ -556,11 +564,11 @@ void main() {
 
     if (fullscreen)
     {
-        window = glfwCreateWindow(640, 480, "Hello Blueberries", glfwGetPrimaryMonitor(), null);
+        window = glfwCreateWindow(640, 480, "Position Based Fluids", glfwGetPrimaryMonitor(), null);
     }
     else
     {
-        window = glfwCreateWindow(640, 480, "Hello Blueberries", null, null);
+        window = glfwCreateWindow(640, 480, "Position Based Fluids", null, null);
     }
 
     if (!window)
@@ -583,64 +591,60 @@ void main() {
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glClearColor(0.7f, 0.7f, 0.7f, 1.0f);
 
     //////////////////////////////////////////////////////////////////////////////
     // Prepare shader program
-    GLuint vertexShader   = compileShader("source/shader/minimal.vert", GL_VERTEX_SHADER);
-    GLuint fragmentShader = compileShader("source/shader/minimal.frag", GL_FRAGMENT_SHADER);
+    GLuint vertexShader   = compileShader("source/shader/particles.vert", GL_VERTEX_SHADER);
+    GLuint fragmentShader = compileShader("source/shader/particles.frag", GL_FRAGMENT_SHADER);
 
     GLuint shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
-    glBindFragDataLocation(shaderProgram, 0, "outColor");
+    glBindFragDataLocation(shaderProgram, 0, "color");
     glLinkProgram(shaderProgram);
     printProgramInfoLog(shaderProgram);
 
-    vertexLoc = glGetAttribLocation(shaderProgram,"position");
-    colorLoc = glGetAttribLocation(shaderProgram, "color");
-    normalLoc = glGetAttribLocation(shaderProgram, "normal");
-    offsetLoc = glGetAttribLocation(shaderProgram, "offset");
-
     projMatrixLoc = glGetUniformLocation(shaderProgram, "projMatrix");
     viewMatrixLoc = glGetUniformLocation(shaderProgram, "viewMatrix");
-    lightPositionLoc = glGetUniformLocation(shaderProgram, "lightPosition");
-    lightIntensitiesLoc = glGetUniformLocation(shaderProgram, "lightIntensities");
-    lightAmbientLoc = glGetUniformLocation(shaderProgram, "lightAmbient");
-    glCheckError();
+    CameraRight_worldspace_ID  = glGetUniformLocation(shaderProgram, "CameraRight_worldspace");
+    CameraUp_worldspace_ID  = glGetUniformLocation(shaderProgram, "CameraUp_worldspace");
+    TextureID  = glGetUniformLocation(shaderProgram, "textureSampler");
+
+    squareVerticesLoc = glGetAttribLocation(shaderProgram, "squareVertices");
+    xyzsLoc = glGetAttribLocation(shaderProgram, "xyzs");
+    colorLoc = glGetAttribLocation(shaderProgram, "color");
+
+    GLuint Texture = loadDDS("particle.DDS");
+
+    glCheckError("Initializing shaders");
 
     GLuint[2] vbo;
+    GLuint billboard_vertex_buffer;
+    GLuint particles_position_buffer;
+    GLuint particles_color_buffer;
+    const int MaxParticles = 100000;
+
     GLuint nbo;
     GLuint obo;
-    glGenVertexArrays(1000000, vao.ptr);
+    GLuint particleVao;
+    glGenVertexArrays(1, &particleVao);
+    glBindVertexArray(particleVao);
     GLint            vSize = 4, cSize = 3;
     GLsizei         stride = 4 * float.sizeof;
     const GLvoid* cPointer = null; //cast(void*)(? * GLfloat.sizeof);
-
-    //////////////////////////////////////////////////////////////////////////////
-    // VAO for the Axis
-    glBindVertexArray(vao[0]);
-    // Generate two slots for the vertex and color buffers
-    glGenBuffers(2, vbo.ptr);
-    // bind buffer for vertices and copy data into buffer
-    glBindBuffer(GL_ARRAY_BUFFER, vbo[0]);
-    glBufferData(GL_ARRAY_BUFFER, verticesAxis.length * GLfloat.sizeof, verticesAxis.ptr, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(vertexLoc);
-    glVertexAttribPointer(vertexLoc, vSize, GL_FLOAT, GL_FALSE, stride, null);
-    // bind buffer for colors and copy data into buffer
-    glBindBuffer(GL_ARRAY_BUFFER, vbo[1]);
-    glBufferData(GL_ARRAY_BUFFER, colorAxis.length * GLfloat.sizeof, colorAxis.ptr, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(colorLoc);
-    glVertexAttribPointer(colorLoc, cSize, GL_FLOAT, GL_FALSE, stride, cPointer);
-    glCheckError();
 
     int width, height;
     glfwGetWindowSize(window, &width, &height);
     reshape(window, width, height);
 
-    sphereData = generateVerticesAndNormals([0,0,0 ,1.0], 0.12, 6 , 12);
+    sphereData = generateVerticesAndNormals([0,0,0 ,1.0], 0.3, 6 , 12);
     sphereVertexTemplates = sphereData[0];
     sphereNormals = sphereData[1];
-    sphereColors = generateColorArray(sphereVertexTemplates);
+    sphereColors = [];
 
     GLfloat[] vertices;
     GLfloat[] normals;
@@ -650,30 +654,6 @@ void main() {
     int spheresX = 1;
     int spheresY = 1;
     int spheresZ = 1;
-
-    writeln("build vertices for spheres");
-
-    for (int i = 0; i < spheresX; i++)
-    {
-      GLfloat cX = 2.0 * i + uniform(0.0, 0.15);
-      for (int j = 0; j < spheresY; j++)
-      {
-          GLfloat cY = 2.0 * j + uniform(0.0, 0.15);
-          for (int k = 0; k < spheresZ; k++)
-          {
-              GLfloat cZ = 2.0 * k + uniform(0.0, 0.15);
-              GLfloat[VECTOR_SIZE] center = [cX, cY, cZ];
-              createParticle(center, vaoIndex);
-              vaoIndex++;
-          }
-      }
-    }
-
-    GLfloat[][] gVaA = generateVerticesAndNormals([0, 0, 0, 1.0], 0.08, 6 , 12);
-    vertices = gVaA[0];
-    sphereVertexCount = vertices.length;
-
-    //writeln(sphereVertexCount * vaoIndex-1);
 
   int i = 0, k = 1;
   uint frame = 0;
@@ -694,9 +674,9 @@ void main() {
 
   GLfloat[VECTOR_SIZE] movementVector = [0,0,0];
   glUseProgram(shaderProgram);
-  glUniform3fv(cast(uint)lightPositionLoc, 1, cast(const(float)*)[cameraX, cameraY, cameraZ]);
+  /*glUniform3fv(cast(uint)lightPositionLoc, 1, cast(const(float)*)[cameraX, cameraY, cameraZ]);
   glUniform3fv(cast(uint)lightIntensitiesLoc, 1, cast(const(float)*)[1f,1f,1f]);
-  glUniform3fv(cast(uint)lightAmbientLoc, 1, cast(const(float)*)[0.1f,0.1f,0.1f]);
+  glUniform3fv(cast(uint)lightAmbientLoc, 1, cast(const(float)*)[0.1f,0.1f,0.1f]);*/
 
   int iter = 0;
 
@@ -713,10 +693,8 @@ void main() {
 
   while (!glfwWindowShouldClose(window)) {
     frames++;
-    glClearColor(0.0, 0.0, 0.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-
+    glCheckError("Clearing the window");
 
     movementVector = [0,0,0];
 
@@ -758,9 +736,18 @@ void main() {
     cameraX += movementVector[0];
     cameraZ += movementVector[1];
 
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glUseProgram(shaderProgram);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, Texture);
+    // Set our "myTextureSampler" sampler to user Texture Unit 0
+    glUniform1i(TextureID, 0);
+
     setCamera(cameraX, cameraY, cameraZ, lookatX, lookatY, lookatZ);
     setUniforms();
-
+    glCheckError("Setting the uniforms");
 
     //////////////////////////////////////////////////////////////////////////////
     // Update the points
@@ -781,43 +768,25 @@ void main() {
     TickDuration endUpdate = sw.peek()-startUpdate;
     totalUpdateTime += endUpdate.msecs;
 
-    GLfloat[] offsets;
     TickDuration startRender = sw.peek();
+    int ParticlesCount = cast(int)sphereIndices.length;
+    GLfloat[] g_particule_position_size_data;
+    GLubyte[] g_particule_color_data;
     for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
     {
-        offsets ~= [parPos[sphereIndex][0], parPos[sphereIndex][1], parPos[sphereIndex][2], 1.0];
+        //offsets ~= [parPos[sphereIndex][0], parPos[sphereIndex][1], parPos[sphereIndex][2], 1.0];
+        g_particule_position_size_data ~= [parPos[sphereIndex][0],parPos[sphereIndex][1],parPos[sphereIndex][2], 1.0f];
+        g_particule_color_data ~= [100,100,255,155];
     }
 
-    prepareSphereBuffers(sphereVertexTemplates, sphereNormals, sphereColors, vao[1], vbo, nbo, vertexLoc, vSize,
-                                           stride,  colorLoc, cSize, cPointer, normalLoc);
+    createParticleBuffers(g_vertex_buffer_data, billboard_vertex_buffer, particles_position_buffer, particles_color_buffer, ParticlesCount);
+    glCheckError("Creating buffers");
+    updateParticleBuffers(particles_position_buffer, particles_color_buffer, ParticlesCount,
+                            g_particule_position_size_data, g_particule_color_data);
+    glCheckError("Updating buffers");
 
-    glGenBuffers(1, &obo);
-    glBindBuffer(GL_ARRAY_BUFFER, obo);
-    glBufferData(GL_ARRAY_BUFFER, 4 * GLfloat.sizeof * sphereIndices.length, &offsets[0], GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(offsetLoc);
-    glVertexAttribPointer(
-        offsetLoc,
-        4,
-        GL_FLOAT,
-        GL_FALSE,
-        stride,
-        null
-    );
-    glBindBuffer(GL_ARRAY_BUFFER, vertexLoc);
-    glVertexAttribDivisor(offsetLoc, 1);
-
-    glBindVertexArray(vao[1]);
-    glDrawArraysInstanced(GL_TRIANGLES, 0, cast(int)sphereVertexTemplates.length, cast(int)sphereIndices.length);
-    glCheckError();
-
-    //prepareSphereBuffers(sphereVertexTemplates, sphereNormals, sphereColors, vaoSpheres, vbo, nbo, vertexLoc, vSize,
-    //                                     stride,  colorLoc, cSize, cPointer, normalLoc);
-    //glCheckError();
-    //drawSphere(vaoSpheres, sphereVertexTemplates.length);
-
-    //Draw axis
-    glBindVertexArray(vao[0]);
-    glDrawArrays(GL_LINES, 0, 6);
+    drawParticles(particleVao, billboard_vertex_buffer, particles_position_buffer, particles_color_buffer, squareVerticesLoc, xyzsLoc, colorLoc, ParticlesCount);
+    glCheckError("Drawing the points");
 
     TickDuration endRender = sw.peek()-startRender;
     totalRenderTime = endRender.usecs;
