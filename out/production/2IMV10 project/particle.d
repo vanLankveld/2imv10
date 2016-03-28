@@ -7,6 +7,12 @@ import mfellner.exception;
 import derelict.opengl3.gl3;
 import derelict.glfw3.glfw3;
 
+struct ParticleContainer{
+    GLfloat[4] position;
+    GLubyte[4] color;
+	GLfloat cameraDistance;
+};
+
 void createParticleBuffers(const(GLfloat[]) g_vertex_buffer_data, ref GLuint billboard_vertex_buffer, ref GLuint particles_position_buffer,
                             ref GLuint particles_color_buffer, const(int) ParticlesCount)
 {

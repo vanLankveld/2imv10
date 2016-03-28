@@ -17,6 +17,7 @@ import gl3n.linalg;
 import _2imv10.sphere;
 import _2imv10.particle;
 import _2imv10.util;
+import std.algorithm.sorting;
 
 import mfellner.exception;
 import mfellner.math;
@@ -772,11 +773,30 @@ void main() {
     int ParticlesCount = cast(int)sphereIndices.length;
     GLfloat[] g_particule_position_size_data;
     GLubyte[] g_particule_color_data;
+    ParticleContainer[] particles;
     for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
     {
+        ParticleContainer p;
+        p.position = [parPos[sphereIndex][0],parPos[sphereIndex][1],parPos[sphereIndex][2], 1.5f];
+        p.color = [100,100,255,155];
+        GLfloat[3] distanceVector;
+        GLfloat[3] particlePos = [p.position[0],p.position[1],p.position[2]];
+        GLfloat[3] cameraPos = [cameraX,cameraY,cameraZ];
+        subtract(cameraPos, particlePos, distanceVector);
+        p.cameraDistance = distance(distanceVector);
+        particles ~= [p];
+    }
+
+    writeln(particles.length);
+
+    sort!("a.cameraDistance > b.cameraDistance", SwapStrategy.stable)(particles);
+
+    for (int particleIndex = 0; particleIndex < cast(int)particles.length; particleIndex++)
+    {
+        ParticleContainer p = particles[particleIndex];
         //offsets ~= [parPos[sphereIndex][0], parPos[sphereIndex][1], parPos[sphereIndex][2], 1.0];
-        g_particule_position_size_data ~= [parPos[sphereIndex][0],parPos[sphereIndex][1],parPos[sphereIndex][2], 1.0f];
-        g_particule_color_data ~= [100,100,255,155];
+        g_particule_position_size_data ~= p.position;
+        g_particule_color_data ~= p.color;
     }
 
     createParticleBuffers(g_vertex_buffer_data, billboard_vertex_buffer, particles_position_buffer, particles_color_buffer, ParticlesCount);
