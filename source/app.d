@@ -40,6 +40,7 @@ GLfloat[] sphereNormals;
 GLfloat[] sphereColors;
 
 GLfloat g = 0.3; // Gravity force
+GLfloat[VECTOR_SIZE] gVec;
 GLfloat h = 1.5; // Kernel size
 GLfloat rho = 0.0008; // Rest density
 GLfloat eps = 0.4; // Relaxation parameter
@@ -78,6 +79,9 @@ GLfloat cameraZ = 4;
 
 GLfloat walkStepSize = 0.05;
 
+GLfloat swaySpeed = 0.01;
+GLfloat swayScale = 0.2;
+GLfloat swayPadding = 0.1;
 
 // Data for drawing Axis
 GLfloat[] verticesAxis = [
@@ -105,6 +109,7 @@ bool fIsDown = false;
 bool gIsDown = false;
 
 bool bIsDown = false;
+bool vIsDown = false;
 
 bool checkExecutionTime = false;
 
@@ -227,10 +232,20 @@ void setCamera(GLfloat posX, GLfloat posY, GLfloat posZ, GLfloat lookAtX, GLfloa
   multMatrix(viewMatrix, aux);
 }
 
+void gravitySway(int time) {
+    gVec = [swayScale*sin(time*swaySpeed),-abs(cos(time*swaySpeed))-swayPadding,0];
+    normalize(gVec);
+    for (int j = 0; j < VECTOR_SIZE; j++){
+        gVec[j] *= g;
+    }
+}
+
 void predictPositions(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat dt){
     for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
         {
-            parVel[sphereIndex][1] -= g*dt;
+            for (int j = 0; j < VECTOR_SIZE; j++){
+                parVel[sphereIndex][j] += gVec[j]*dt;
+            }
             for (int j = 0; j < VECTOR_SIZE; j++){
                 parAux[sphereIndex][j] = parPos[sphereIndex][j] + parVel[sphereIndex][j]*dt;
             }
@@ -261,7 +276,7 @@ void assignBins(ref int[VECTOR_SIZE] binDims, ref int[][][][] bins, ref GLfloat[
         {
             int[VECTOR_SIZE] curbin;
             for(int j = VECTOR_SIZE -1; j >= 0; j--){
-                curbin[j] = to!int((parAux[sphereIndex][j] - boundsL[j])/binsize);
+                curbin[j] = to!uint((parAux[sphereIndex][j] - boundsL[j])/binsize);
                 if(curbin[j] == binDims[j] ) {
                     curbin[j]--;
                 }
@@ -534,6 +549,7 @@ void createFaucet(GLfloat[VECTOR_SIZE] p){
 // adapted from http://open.gl/drawing and
 // http://www.lighthouse3d.com/cg-topics/code-samples/opengl-3-3-glsl-1-5-sample
 void main() {
+    gVec = [0.0,-g,0.0];
     DerelictGL3.load();
     DerelictGLFW3.load();
 
@@ -702,6 +718,8 @@ void main() {
 
   int faucetCounter = 0;
 
+  int swayCounter = 0;
+
   StopWatch sw;
 
   long totalUpdateTime = 0;
@@ -756,6 +774,11 @@ void main() {
               parPos[sphereIndex][1] = parPos[sphereIndex][1] + 15;
             }
         }
+    }
+    if(vIsDown)
+    {
+        swayCounter++;
+        gravitySway(swayCounter);
     }
 
     lookatX += movementVector[0];
@@ -869,7 +892,7 @@ extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, i
 {
 
     if ((action != 1 && action != 0) || (key != GLFW_KEY_W && key != GLFW_KEY_A && key != GLFW_KEY_S && key != GLFW_KEY_D
-            && key != GLFW_KEY_F && key != GLFW_KEY_G && key != GLFW_KEY_B))
+            && key != GLFW_KEY_F && key != GLFW_KEY_G && key != GLFW_KEY_B && key != GLFW_KEY_V))
     {
         return;
     }
@@ -900,6 +923,9 @@ extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, i
                 break;
             case GLFW_KEY_B:
                 bIsDown = action == 1;
+                break;
+            case GLFW_KEY_V:
+                vIsDown = action == 1;
                 break;
             default:
                 break;
