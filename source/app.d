@@ -33,6 +33,7 @@ GLuint vaoSpheres;
 GLuint[] sphereIndices; // Particle indices for vao
 GLfloat[VECTOR_SIZE][] parPos; // Current particle positions
 GLfloat[VECTOR_SIZE][] parVel; // Current particle velocities
+GLfloat[] parType; // Particle types, currently 1 for immovable solid, 0 for liquid
 
 GLfloat[][] sphereData;
 GLfloat[] sphereVertexTemplates;
@@ -232,6 +233,36 @@ void setCamera(GLfloat posX, GLfloat posY, GLfloat posZ, GLfloat lookAtX, GLfloa
   multMatrix(viewMatrix, aux);
 }
 
+void setEnvironment(ref uint vaoIndex){
+        //Create a punctured rain dish
+        int rad = 4;
+        for (int i = -rad; i <= rad; i++)
+        {
+          GLfloat cX = 2*h/3 * i;
+          for (int j = -rad; j <= rad; j++)
+          {
+            GLfloat cZ = 2*h/3 * j;
+            GLfloat cY = boundsL[1]+4.0+0.3*max(abs(i),abs(j));
+            if(i==0&&j==0) continue;
+            createParticle([cX,cY,cZ],vaoIndex,1);
+          }
+        }
+
+        //Create a large sphere
+        auto vertices = generateVerticesAndNormals([5.0,-6.0,0.0,1.0], 2.0, 9, 15)[0];
+        for (int i = to!int(vertices.length) - 1; i > 2; i -= 4){
+            bool wasAdded = false;
+            for (int j = to!int(parPos.length) - 1; j >= 0; j--){
+                if(vertices[i-3] == parPos[j][0] && vertices[i-2] == parPos[j][1] && vertices[i-1] == parPos[j][2]){
+                    wasAdded = true;
+                    break;
+                }
+            }
+            if(wasAdded) continue;
+            createParticle([vertices[i-3],vertices[i-2],vertices[i-1]],vaoIndex,1);
+        }
+}
+
 void gravitySway(int time) {
     gVec = [swayScale*sin(time*swaySpeed),-abs(cos(time*swaySpeed))-swayPadding,0];
     normalize(gVec);
@@ -244,7 +275,9 @@ void predictPositions(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat dt){
     for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
         {
             for (int j = 0; j < VECTOR_SIZE; j++){
-                parVel[sphereIndex][j] += gVec[j]*dt;
+                if(parType[sphereIndex] == 0){
+                    parVel[sphereIndex][j] += gVec[j]*dt;
+                } else parVel[sphereIndex][j] = 0;
             }
             for (int j = 0; j < VECTOR_SIZE; j++){
                 parAux[sphereIndex][j] = parPos[sphereIndex][j] + parVel[sphereIndex][j]*dt;
@@ -345,7 +378,7 @@ void calculateLambdas(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[] parLam, r
 }
 
 void calculateDeltaP(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[] parLam, ref GLfloat[VECTOR_SIZE][] parDP, ref int[][] neighbours){
-    foreach (sphereIndex; taskPool.parallel(iota(0,to!int(sphereIndices.length)))){
+    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--){
             GLfloat[VECTOR_SIZE] dp = [0,0,0];
             for (int neighIndex = to!int(neighbours[sphereIndex].length) - 1; neighIndex >= 0; neighIndex--)
             {
@@ -360,7 +393,9 @@ void calculateDeltaP(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[] parLam, re
                     dp = [dp[0] + da[0]*scalar, dp[1] + da[1]*scalar, dp[2] + da[2]*scalar];
                 }
             }
-            parDP[sphereIndex] = dp;
+            if(parType[sphereIndex] == 0){
+                parDP[sphereIndex] = dp;
+            } else parDP[sphereIndex] = [0,0,0];
         }
 }
 
@@ -534,11 +569,14 @@ void updateState(GLfloat dt){
 }
 
 // Creates a new particle from position p
-void createParticle(GLfloat[VECTOR_SIZE] p, int vaoIndex){
+void createParticle(GLfloat[VECTOR_SIZE] p, ref uint vaoIndex, uint type){
+    assert (type < 2);
     sphereIndices ~= vaoIndex;
     parPos ~= p;
     parVel ~= [0,0,0];
+    parType ~= type;
     checkExecutionTime = true;
+    vaoIndex++;
 }
 
 // Creates a new faucet from position p
@@ -679,8 +717,7 @@ void main() {
           {
               GLfloat cZ = 2.0 * k + uniform(0.0, 0.15);
               GLfloat[VECTOR_SIZE] center = [cX, cY, cZ];
-              createParticle(center, vaoIndex);
-              vaoIndex++;
+              createParticle(center, vaoIndex, 0);
           }
       }
     }
@@ -689,6 +726,7 @@ void main() {
     vertices = gVaA[0];
     sphereVertexCount = vertices.length;
 
+    setEnvironment(vaoIndex);
     //writeln(sphereVertexCount * vaoIndex-1);
 
   int i = 0, k = 1;
@@ -799,8 +837,7 @@ void main() {
         for (int w = 0; w < faucets.length && w < faucetCounter; w++){
 
             if((iter+w*4)%(4*fps) == 0){
-              createParticle([uniform(-h/10, h/10) + faucets[w][0],uniform(-h/10, h/10) + faucets[w][1],uniform(-h/10, h/10) + faucets[w][2]], vaoIndex);
-              vaoIndex++;
+              createParticle([uniform(-h/10, h/10) + faucets[w][0],uniform(-h/10, h/10) + faucets[w][1],uniform(-h/10, h/10) + faucets[w][2]], vaoIndex, 0);
             }
         }
 
