@@ -11,6 +11,7 @@ struct ParticleContainer{
     GLfloat[4] position;
     GLubyte[4] color;
 	GLfloat cameraDistance;
+	bool isSolid = false;
 };
 
 void createParticleBuffers(const(GLfloat[]) g_vertex_buffer_data, ref GLuint billboard_vertex_buffer, ref GLuint particles_position_buffer,

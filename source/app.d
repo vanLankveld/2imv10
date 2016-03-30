@@ -847,6 +847,14 @@ void main() {
       GLfloat[3] cameraSpherical = cartToSpherical([cameraX,cameraZ,cameraY,1.0]);
       cameraSpherical[0] += rotateVertical;
       cameraSpherical[1] += rotateHorizontal;
+      if (cameraSpherical[1] > (PI/2)-0.1)
+      {
+        cameraSpherical[1] = (PI/2)-0.1;
+      }
+      else if (cameraSpherical[1] < (-PI/2+0.1))
+      {
+        cameraSpherical[1] = (-PI/2+0.1);
+      }
       cameraSpherical[2] += zoom;
       GLfloat[4] cameraCartesian = sphericalToCart(cameraSpherical[0],cameraSpherical[1],cameraSpherical[2]);
 
@@ -904,13 +912,22 @@ void main() {
     for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
     {
         ParticleContainer p;
-        p.position = [parPos[sphereIndex][0],parPos[sphereIndex][1],parPos[sphereIndex][2], 1.5f];
+        p.position = [parPos[sphereIndex][0],parPos[sphereIndex][1],parPos[sphereIndex][2], 1.4f];
         p.color = [100,100,255,40];
         GLfloat[3] distanceVector;
         GLfloat[3] particlePos = [p.position[0],p.position[1],p.position[2]];
         GLfloat[3] cameraPos = [cameraX,cameraY,cameraZ];
         subtract(cameraPos, particlePos, distanceVector);
         p.cameraDistance = distance(distanceVector);
+        if (parType[sphereIndex] == 1)
+        {
+            p.color = [255,25,25,80];
+            p.position[3] = 1.6f;
+        }
+        else
+        {
+            p.color = [100,100,255,40];
+        }
         particles ~= [p];
     }
 
