@@ -978,8 +978,11 @@ void main() {
         {
             p.color = [255,25,25,80];
             p.position[3] = 1.6f;
-        }
-        else
+        } else if (parType[sphereIndex] == 2)
+        {
+            p.color = [25,255,25,80];
+            p.position[3] = 1.6f;
+        } else
         {
             p.color = [100,100,255,40];
         }
