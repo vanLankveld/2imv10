@@ -189,7 +189,7 @@ extern(C) nothrow void reshape(GLFWwindow* window, int width, int height) {
   if(height == 0) height = 1;
   glViewport(0, 0, width, height);
   GLfloat ratio = cast(GLfloat)width / cast(GLfloat)height;
-  buildProjectionMatrix(60.0, ratio, 1.0, 30.0);
+  buildProjectionMatrix(60.0, ratio, 1.0, 60.0);
 }
 
 void setUniforms() {
@@ -728,25 +728,11 @@ void main() {
 
     if(wIsDown)
     {
-        /*GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 0, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);*/
         zoom -= zoomStepSize;
     }
     if(sIsDown)
     {
-        /*GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 1, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);*/
         zoom += zoomStepSize;
-    }
-    if(aIsDown)
-    {
-        GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 2, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);
-    }
-    if(dIsDown)
-    {
-        GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 3, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);
     }
     if(fIsDown)
     {
@@ -852,7 +838,7 @@ void main() {
     {
         ParticleContainer p;
         p.position = [parPos[sphereIndex][0],parPos[sphereIndex][1],parPos[sphereIndex][2], 1.5f];
-        p.color = [100,100,255,100];
+        p.color = [100,100,255,40];
         GLfloat[3] distanceVector;
         GLfloat[3] particlePos = [p.position[0],p.position[1],p.position[2]];
         GLfloat[3] cameraPos = [cameraX,cameraY,cameraZ];
@@ -863,11 +849,25 @@ void main() {
 
     sort!("a.cameraDistance > b.cameraDistance", SwapStrategy.stable)(particles);
 
+    GLfloat cameraRange = 1;
+    if (ParticlesCount > 1)
+    {
+        cameraRange = particles[0].cameraDistance-particles[ParticlesCount-1].cameraDistance;
+    }
+    GLfloat distanceStep = 1/cameraRange;
+    GLfloat dAlpha = 80;
+
     for (int particleIndex = 0; particleIndex < cast(int)particles.length; particleIndex++)
     {
         ParticleContainer p = particles[particleIndex];
         //offsets ~= [parPos[sphereIndex][0], parPos[sphereIndex][1], parPos[sphereIndex][2], 1.0];
         g_particule_position_size_data ~= p.position;
+        int alpha = cast(int)(dAlpha * distanceStep * p.cameraDistance);
+        if (alpha > 120)
+        {
+            alpha = 120;
+        }
+        p.color[3] = to!ubyte(alpha);
         g_particule_color_data ~= p.color;
     }
 
