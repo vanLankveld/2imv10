@@ -177,3 +177,25 @@ void setTranslationMatrix(ref GLfloat[MATRIX_SIZE] mat, float x, float y, float 
   mat[13] = y;
   mat[14] = z;
 }
+
+GLfloat[4] sphericalToCart(GLfloat theta, GLfloat phi, GLfloat radius)
+{
+    GLfloat[4] result =
+    [
+        radius * sin(theta) * cos(phi),
+        radius * sin(theta) * sin(phi),
+        radius * cos(theta),
+        1.0
+    ];
+
+    return result;
+}
+
+GLfloat[3] cartToSpherical(GLfloat[4] cartCoordinates)
+{
+    GLfloat radius = distance([cartCoordinates[0],cartCoordinates[1],cartCoordinates[2]]);
+    GLfloat theta = acos(cartCoordinates[2]/radius);
+    GLfloat phi = atan(cartCoordinates[1]/cartCoordinates[0]);
+
+    return [theta, phi, radius];
+}

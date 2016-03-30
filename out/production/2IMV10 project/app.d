@@ -15,6 +15,9 @@ import derelict.opengl3.gl3;
 import derelict.glfw3.glfw3;
 import gl3n.linalg;
 import _2imv10.sphere;
+import _2imv10.particle;
+import _2imv10.util;
+import std.algorithm.sorting;
 
 import mfellner.exception;
 import mfellner.math;
@@ -22,7 +25,7 @@ import mfellner.math;
 bool fullscreen = false;
 
 GLuint vertexLoc, colorLoc, normalLoc;
-GLuint projMatrixLoc, offsetLoc, viewMatrixLoc, lightIntensitiesLoc, lightPositionLoc, lightAmbientLoc;
+GLuint projMatrixLoc, offsetLoc, viewMatrixLoc, particleColorLoc, lightIntensitiesLoc, lightPositionLoc, lightAmbientLoc;
 
 GLfloat[MATRIX_SIZE] projMatrix;
 GLfloat[MATRIX_SIZE] viewMatrix;
@@ -33,16 +36,24 @@ GLuint vaoSpheres;
 GLuint[] sphereIndices; // Particle indices for vao
 GLfloat[VECTOR_SIZE][] parPos; // Current particle positions
 GLfloat[VECTOR_SIZE][] parVel; // Current particle velocities
+GLfloat[] parType; // Particle types, currently 1 for immovable solid, 0 for liquid
 
 GLfloat[][] sphereData;
 GLfloat[] sphereVertexTemplates;
 GLfloat[] sphereNormals;
 GLfloat[] sphereColors;
 
+GLuint CameraRight_worldspace_ID;
+GLuint CameraUp_worldspace_ID;
+GLuint TextureID;
+
+GLuint squareVerticesLoc, xyzsLoc;
+
 GLfloat g = 0.3; // Gravity force
+GLfloat[VECTOR_SIZE] gVec;
 GLfloat h = 1.5; // Kernel size
 GLfloat rho = 0.0008; // Rest density
-GLfloat eps = 0.02; // Relaxation parameter
+GLfloat eps = 0.4; // Relaxation parameter
 
 GLfloat binsize = 1.0; // Size of bins for spatial partitioning, should be at least 4*h
 
@@ -53,15 +64,15 @@ GLfloat kScale = 0.1; // Scalar for that stuff
 GLfloat cScale = 0.01; // Scalar for viscocity
 
 int solveIter = 3; // Number of corrective calculation cycles
-int numUpdates = 2; // Number of updates per frame
+int numUpdates = 1; // Number of updates per frame
 
 int fps = 15; //Number of frames per second
 
 ulong sphereVertexCount;
 
 //Bounds
-GLfloat[VECTOR_SIZE] boundsU = [9.5,4.5,9.5];
-GLfloat[VECTOR_SIZE] boundsL = [-9.5,-7.5,-9.5];
+GLfloat[VECTOR_SIZE] boundsU = [7.5,11.5,7.5];
+GLfloat[VECTOR_SIZE] boundsL = [-7.5,-7.5,-7.5];
 GLfloat secondBottom = -9.5;
 
 //Faucets
@@ -76,25 +87,24 @@ GLfloat cameraX = 4;
 GLfloat cameraY = 1;
 GLfloat cameraZ = 4;
 
-GLfloat walkStepSize = 0.05;
+GLfloat rotateHorizontal = 0;
+GLfloat rotateVertical = 0;
+GLfloat zoom = 0;
 
+GLfloat swaySpeed = 0.01;
+GLfloat swayScale = 0.2;
+GLfloat swayPadding = 0.1;
 
-// Data for drawing Axis
-GLfloat[] verticesAxis = [
--20.0,  0.0,  0.0f, 1.0,
- 20.0,  0.0,  0.0f, 1.0,
-  0.0,-20.0,  0.0f, 1.0,
-  0.0, 20.0,  0.0f, 1.0,
-  0.0,  0.0,-20.0f, 1.0,
-  0.0,  0.0, 20.0f, 1.0];
+const(GLfloat) walkStepSize = 0.05;
+const(GLfloat) orbitStepSize = 0.05;
+const(GLfloat) zoomStepSize = 0.2;
 
-GLfloat[] colorAxis = [
-  1.0, 0.0, 0.0, 1.0,
-  1.0, 0.0, 0.0, 1.0,
-  0.0, 1.0, 0.0, 1.0,
-  0.0, 1.0, 0.0, 1.0,
-  0.0, 0.0, 1.0, 1.0,
-  0.0, 0.0, 1.0, 1.0];
+static const GLfloat[] g_vertex_buffer_data = [
+ -0.5f, -0.5f, 0.0f,
+ 0.5f, -0.5f, 0.0f,
+ -0.5f, 0.5f, 0.0f,
+ 0.5f, 0.5f, 0.0f
+];
 
 bool wIsDown = false;
 bool aIsDown = false;
@@ -103,8 +113,13 @@ bool dIsDown = false;
 
 bool fIsDown = false;
 bool gIsDown = false;
-
 bool bIsDown = false;
+bool vIsDown = false;
+
+bool upIsDown = false;
+bool rightIsDown = false;
+bool downIsDown = false;
+bool leftIsDown = false;
 
 bool checkExecutionTime = false;
 
@@ -139,13 +154,20 @@ GLuint compileShader(string filename, GLuint type) {
   glShaderSource(shader, 1, &sp, null);
   glCompileShader(shader);
 
+  GLint infologLength;
+
   GLint status;
   glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
-  if (status != GL_TRUE) {
+    if (status != GL_TRUE) {
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infologLength);
+        if (infologLength > 0) {
+            char[] buffer = new char[infologLength];
+            glGetShaderInfoLog(shader, infologLength, null, buffer.ptr);
+            writeln(buffer);
+        }
     throw new Exception("Failed to compile shader");
   }
 
-  GLint infologLength;
   glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infologLength);
   if (infologLength > 0) {
     char[] buffer = new char[infologLength];
@@ -174,10 +196,13 @@ extern(C) nothrow void reshape(GLFWwindow* window, int width, int height) {
   if(height == 0) height = 1;
   glViewport(0, 0, width, height);
   GLfloat ratio = cast(GLfloat)width / cast(GLfloat)height;
-  buildProjectionMatrix(60.0, ratio, 1.0, 30.0);
+  buildProjectionMatrix(60.0, ratio, 1.0, 60.0);
 }
 
 void setUniforms() {
+    glUniform3f(CameraRight_worldspace_ID, viewMatrix[0], viewMatrix[4], viewMatrix[8]);
+    glUniform3f(CameraUp_worldspace_ID   , viewMatrix[1], viewMatrix[5], viewMatrix[9]);
+
     glUniformMatrix4fv(projMatrixLoc, 1, false, projMatrix.ptr);
     glUniformMatrix4fv(viewMatrixLoc, 1, false, viewMatrix.ptr);
 }
@@ -222,15 +247,70 @@ void setCamera(GLfloat posX, GLfloat posY, GLfloat posZ, GLfloat lookAtX, GLfloa
   viewMatrix[11] = 0.0;
   viewMatrix[15] = 1.0;
 
+  mat4 viewMat = mat4(
+    vec4(viewMatrix[0], viewMatrix[1], viewMatrix[2], viewMatrix[3]),
+    vec4(viewMatrix[4], viewMatrix[5], viewMatrix[6], viewMatrix[7]),
+    vec4(viewMatrix[8], viewMatrix[9], viewMatrix[10], viewMatrix[11]),
+    vec4(viewMatrix[12], viewMatrix[13], viewMatrix[14], viewMatrix[15])
+  );
+
+    const(float)* pSource = cast(const(float)*)viewMat.value_ptr;
+    for (int i = 0; i < 16; ++i)
+    {
+        viewMatrix[i] = pSource[i];
+    }
+
   setTranslationMatrix(aux, -posX, -posY, -posZ);
 
   multMatrix(viewMatrix, aux);
 }
 
+void setEnvironment(ref uint vaoIndex){
+        //Create a punctured rain dish
+        int rad = 4;
+        for (int i = -rad; i <= rad; i++)
+        {
+          GLfloat cX = 2*h/3 * i;
+          for (int j = -rad; j <= rad; j++)
+          {
+            GLfloat cZ = 2*h/3 * j;
+            GLfloat cY = boundsL[1]+4.0+0.3*max(abs(i),abs(j));
+            if(i==0&&j==0) continue;
+            createParticle([cX,cY,cZ],vaoIndex,1);
+          }
+        }
+
+        //Create a large sphere
+        auto vertices = generateVerticesAndNormals([5.0,-6.0,0.0,1.0], 2.0, 9, 15)[0];
+        for (int i = to!int(vertices.length) - 1; i > 2; i -= 4){
+            bool wasAdded = false;
+            for (int j = to!int(parPos.length) - 1; j >= 0; j--){
+                if(vertices[i-3] == parPos[j][0] && vertices[i-2] == parPos[j][1] && vertices[i-1] == parPos[j][2]){
+                    wasAdded = true;
+                    break;
+                }
+            }
+            if(wasAdded) continue;
+            createParticle([vertices[i-3],vertices[i-2],vertices[i-1]],vaoIndex,1);
+        }
+}
+
+void gravitySway(int time) {
+    gVec = [swayScale*sin(time*swaySpeed),-abs(cos(time*swaySpeed))-swayPadding,0];
+    normalize(gVec);
+    for (int j = 0; j < VECTOR_SIZE; j++){
+        gVec[j] *= g;
+    }
+}
+
 void predictPositions(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat dt){
     for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
         {
-            parVel[sphereIndex][1] -= g*dt;
+            for (int j = 0; j < VECTOR_SIZE; j++){
+                if(parType[sphereIndex] == 0){
+                    parVel[sphereIndex][j] += gVec[j]*dt;
+                } else parVel[sphereIndex][j] = 0;
+            }
             for (int j = 0; j < VECTOR_SIZE; j++){
                 parAux[sphereIndex][j] = parPos[sphereIndex][j] + parVel[sphereIndex][j]*dt;
             }
@@ -261,7 +341,7 @@ void assignBins(ref int[VECTOR_SIZE] binDims, ref int[][][][] bins, ref GLfloat[
         {
             int[VECTOR_SIZE] curbin;
             for(int j = VECTOR_SIZE -1; j >= 0; j--){
-                curbin[j] = to!int((parAux[sphereIndex][j] - boundsL[j])/binsize);
+                curbin[j] = to!uint((parAux[sphereIndex][j] - boundsL[j])/binsize);
                 if(curbin[j] == binDims[j] ) {
                     curbin[j]--;
                 }
@@ -330,7 +410,7 @@ void calculateLambdas(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[] parLam, r
 }
 
 void calculateDeltaP(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[] parLam, ref GLfloat[VECTOR_SIZE][] parDP, ref int[][] neighbours){
-    foreach (sphereIndex; taskPool.parallel(iota(0,to!int(sphereIndices.length)))){
+    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--){
             GLfloat[VECTOR_SIZE] dp = [0,0,0];
             for (int neighIndex = to!int(neighbours[sphereIndex].length) - 1; neighIndex >= 0; neighIndex--)
             {
@@ -345,7 +425,9 @@ void calculateDeltaP(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[] parLam, re
                     dp = [dp[0] + da[0]*scalar, dp[1] + da[1]*scalar, dp[2] + da[2]*scalar];
                 }
             }
-            parDP[sphereIndex] = dp;
+            if(parType[sphereIndex] == 0){
+                parDP[sphereIndex] = dp;
+            } else parDP[sphereIndex] = [0,0,0];
         }
 }
 
@@ -519,11 +601,14 @@ void updateState(GLfloat dt){
 }
 
 // Creates a new particle from position p
-void createParticle(GLfloat[VECTOR_SIZE] p, int vaoIndex){
+void createParticle(GLfloat[VECTOR_SIZE] p, ref uint vaoIndex, uint type){
+    assert (type < 2);
     sphereIndices ~= vaoIndex;
     parPos ~= p;
     parVel ~= [0,0,0];
+    parType ~= type;
     checkExecutionTime = true;
+    vaoIndex++;
 }
 
 // Creates a new faucet from position p
@@ -534,6 +619,7 @@ void createFaucet(GLfloat[VECTOR_SIZE] p){
 // adapted from http://open.gl/drawing and
 // http://www.lighthouse3d.com/cg-topics/code-samples/opengl-3-3-glsl-1-5-sample
 void main() {
+    gVec = [0.0,-g,0.0];
     DerelictGL3.load();
     DerelictGLFW3.load();
 
@@ -556,11 +642,11 @@ void main() {
 
     if (fullscreen)
     {
-        window = glfwCreateWindow(640, 480, "Hello Blueberries", glfwGetPrimaryMonitor(), null);
+        window = glfwCreateWindow(640, 480, "Position Based Fluids", glfwGetPrimaryMonitor(), null);
     }
     else
     {
-        window = glfwCreateWindow(640, 480, "Hello Blueberries", null, null);
+        window = glfwCreateWindow(640, 480, "Position Based Fluids", null, null);
     }
 
     if (!window)
@@ -583,64 +669,60 @@ void main() {
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glClearColor(0.7f, 0.7f, 0.7f, 1.0f);
 
     //////////////////////////////////////////////////////////////////////////////
     // Prepare shader program
-    GLuint vertexShader   = compileShader("source/shader/minimal.vert", GL_VERTEX_SHADER);
-    GLuint fragmentShader = compileShader("source/shader/minimal.frag", GL_FRAGMENT_SHADER);
+    GLuint vertexShader   = compileShader("source/shader/particles.vert", GL_VERTEX_SHADER);
+    GLuint fragmentShader = compileShader("source/shader/particles.frag", GL_FRAGMENT_SHADER);
 
     GLuint shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
-    glBindFragDataLocation(shaderProgram, 0, "outColor");
+    glBindFragDataLocation(shaderProgram, 0, "color");
     glLinkProgram(shaderProgram);
     printProgramInfoLog(shaderProgram);
 
-    vertexLoc = glGetAttribLocation(shaderProgram,"position");
-    colorLoc = glGetAttribLocation(shaderProgram, "color");
-    normalLoc = glGetAttribLocation(shaderProgram, "normal");
-    offsetLoc = glGetAttribLocation(shaderProgram, "offset");
-
     projMatrixLoc = glGetUniformLocation(shaderProgram, "projMatrix");
     viewMatrixLoc = glGetUniformLocation(shaderProgram, "viewMatrix");
-    lightPositionLoc = glGetUniformLocation(shaderProgram, "lightPosition");
-    lightIntensitiesLoc = glGetUniformLocation(shaderProgram, "lightIntensities");
-    lightAmbientLoc = glGetUniformLocation(shaderProgram, "lightAmbient");
-    glCheckError();
+    CameraRight_worldspace_ID  = glGetUniformLocation(shaderProgram, "CameraRight_worldspace");
+    CameraUp_worldspace_ID  = glGetUniformLocation(shaderProgram, "CameraUp_worldspace");
+    TextureID  = glGetUniformLocation(shaderProgram, "textureSampler");
+
+    squareVerticesLoc = glGetAttribLocation(shaderProgram, "squareVertices");
+    xyzsLoc = glGetAttribLocation(shaderProgram, "xyzs");
+    colorLoc = glGetAttribLocation(shaderProgram, "color");
+
+    GLuint Texture = loadDDS("particle.DDS");
+
+    glCheckError("Initializing shaders");
 
     GLuint[2] vbo;
+    GLuint billboard_vertex_buffer;
+    GLuint particles_position_buffer;
+    GLuint particles_color_buffer;
+    const int MaxParticles = 100000;
+
     GLuint nbo;
     GLuint obo;
-    glGenVertexArrays(1000000, vao.ptr);
+    GLuint particleVao;
+    glGenVertexArrays(1, &particleVao);
+    glBindVertexArray(particleVao);
     GLint            vSize = 4, cSize = 3;
     GLsizei         stride = 4 * float.sizeof;
     const GLvoid* cPointer = null; //cast(void*)(? * GLfloat.sizeof);
-
-    //////////////////////////////////////////////////////////////////////////////
-    // VAO for the Axis
-    glBindVertexArray(vao[0]);
-    // Generate two slots for the vertex and color buffers
-    glGenBuffers(2, vbo.ptr);
-    // bind buffer for vertices and copy data into buffer
-    glBindBuffer(GL_ARRAY_BUFFER, vbo[0]);
-    glBufferData(GL_ARRAY_BUFFER, verticesAxis.length * GLfloat.sizeof, verticesAxis.ptr, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(vertexLoc);
-    glVertexAttribPointer(vertexLoc, vSize, GL_FLOAT, GL_FALSE, stride, null);
-    // bind buffer for colors and copy data into buffer
-    glBindBuffer(GL_ARRAY_BUFFER, vbo[1]);
-    glBufferData(GL_ARRAY_BUFFER, colorAxis.length * GLfloat.sizeof, colorAxis.ptr, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(colorLoc);
-    glVertexAttribPointer(colorLoc, cSize, GL_FLOAT, GL_FALSE, stride, cPointer);
-    glCheckError();
 
     int width, height;
     glfwGetWindowSize(window, &width, &height);
     reshape(window, width, height);
 
-    sphereData = generateVerticesAndNormals([0,0,0 ,1.0], 0.12, 6 , 12);
+    sphereData = generateVerticesAndNormals([0,0,0 ,1.0], 0.3, 6 , 12);
     sphereVertexTemplates = sphereData[0];
     sphereNormals = sphereData[1];
-    sphereColors = generateColorArray(sphereVertexTemplates);
+    sphereColors = [];
 
     GLfloat[] vertices;
     GLfloat[] normals;
@@ -651,28 +733,11 @@ void main() {
     int spheresY = 1;
     int spheresZ = 1;
 
-    writeln("build vertices for spheres");
-
-    for (int i = 0; i < spheresX; i++)
-    {
-      GLfloat cX = 2.0 * i + uniform(0.0, 0.15);
-      for (int j = 0; j < spheresY; j++)
-      {
-          GLfloat cY = 2.0 * j + uniform(0.0, 0.15);
-          for (int k = 0; k < spheresZ; k++)
-          {
-              GLfloat cZ = 2.0 * k + uniform(0.0, 0.15);
-              GLfloat[VECTOR_SIZE] center = [cX, cY, cZ];
-              createParticle(center, vaoIndex);
-              vaoIndex++;
-          }
-      }
-    }
-
     GLfloat[][] gVaA = generateVerticesAndNormals([0, 0, 0, 1.0], 0.08, 6 , 12);
     vertices = gVaA[0];
     sphereVertexCount = vertices.length;
 
+    setEnvironment(vaoIndex);
     //writeln(sphereVertexCount * vaoIndex-1);
 
   int i = 0, k = 1;
@@ -686,21 +751,23 @@ void main() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Initialize rain
-  for (int v = to!int(ceil(boundsL[0]))+1; v <= to!int(floor(boundsU[0]))-1; v+=2){
-    for (int w = to!int(ceil(boundsL[2]))+1; w <= to!int(floor(boundsU[2]))-1; w +=2){
-        createFaucet([v,4,w]);
+  for (float v = to!int(ceil(boundsL[0]))+1; v <= to!int(floor(boundsU[0]))-1; v+=1.5*h){
+    for (float w = to!int(ceil(boundsL[2]))+1; w <= to!int(floor(boundsU[2]))-1; w +=1.5*h){
+        createFaucet([v,6,w]);
     }
   }
 
   GLfloat[VECTOR_SIZE] movementVector = [0,0,0];
   glUseProgram(shaderProgram);
-  glUniform3fv(cast(uint)lightPositionLoc, 1, cast(const(float)*)[cameraX, cameraY, cameraZ]);
+  /*glUniform3fv(cast(uint)lightPositionLoc, 1, cast(const(float)*)[cameraX, cameraY, cameraZ]);
   glUniform3fv(cast(uint)lightIntensitiesLoc, 1, cast(const(float)*)[1f,1f,1f]);
-  glUniform3fv(cast(uint)lightAmbientLoc, 1, cast(const(float)*)[0.1f,0.1f,0.1f]);
+  glUniform3fv(cast(uint)lightAmbientLoc, 1, cast(const(float)*)[0.1f,0.1f,0.1f]);*/
 
   int iter = 0;
 
   int faucetCounter = 0;
+
+  int swayCounter = 0;
 
   StopWatch sw;
 
@@ -713,32 +780,22 @@ void main() {
 
   while (!glfwWindowShouldClose(window)) {
     frames++;
-    glClearColor(0.0, 0.0, 0.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-
+    glCheckError("Clearing the window");
 
     movementVector = [0,0,0];
 
+    rotateHorizontal = 0;
+    rotateVertical = 0;
+    zoom = 0;
+
     if(wIsDown)
     {
-        GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 0, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);
+        zoom -= zoomStepSize;
     }
     if(sIsDown)
     {
-        GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 1, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);
-    }
-    if(aIsDown)
-    {
-        GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 2, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);
-    }
-    if(dIsDown)
-    {
-        GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 3, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);
+        zoom += zoomStepSize;
     }
     if(fIsDown)
     {
@@ -750,17 +807,84 @@ void main() {
     }
     if(bIsDown)
     {
-        //Do some splashing stuff
+        for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+        {
+            if(parPos[sphereIndex][0] < 1.5 && parPos[sphereIndex][0] > -1.5 && parPos[sphereIndex][2] < 1.5 && parPos[sphereIndex][2] > -1.5){
+              parPos[sphereIndex][1] = parPos[sphereIndex][1] + 15;
+            }
+        }
     }
+    if (upIsDown)
+    {
+        rotateVertical += orbitStepSize;
+    }
+    if (rightIsDown)
+    {
+        rotateHorizontal += orbitStepSize;
+    }
+    if (downIsDown)
+    {
+        rotateVertical -= orbitStepSize;
+    }
+    if (leftIsDown)
+    {
+        rotateHorizontal -= orbitStepSize;
+    }
+    if(vIsDown)
+    {
+        swayCounter++;
+        gravitySway(swayCounter);
+    }
+
+    //printf("rH=%f, rV=%f\n", rotateHorizontal, rotateVertical);
+
+    //Translate to origin
+      cameraX -= lookatX;
+      cameraY -= lookatY;
+      cameraZ -= lookatZ;
+
+      //Rotate camera
+      GLfloat[3] cameraSpherical = cartToSpherical([cameraX,cameraZ,cameraY,1.0]);
+      cameraSpherical[0] += rotateVertical;
+      cameraSpherical[1] += rotateHorizontal;
+      if (cameraSpherical[1] > (PI/2)-0.1)
+      {
+        cameraSpherical[1] = (PI/2)-0.1;
+      }
+      else if (cameraSpherical[1] < (-PI/2+0.1))
+      {
+        cameraSpherical[1] = (-PI/2+0.1);
+      }
+      cameraSpherical[2] += zoom;
+      GLfloat[4] cameraCartesian = sphericalToCart(cameraSpherical[0],cameraSpherical[1],cameraSpherical[2]);
+
+      cameraX = cameraCartesian[0];
+      cameraZ = cameraCartesian[1];
+      cameraY = cameraCartesian[2];
+
+      //Translate back
+      cameraX -= lookatX;
+      cameraY += lookatY;
+      cameraZ += lookatZ;
 
     lookatX += movementVector[0];
     lookatZ += movementVector[1];
     cameraX += movementVector[0];
     cameraZ += movementVector[1];
 
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glUseProgram(shaderProgram);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, Texture);
+    // Set our "myTextureSampler" sampler to user Texture Unit 0
+    glUniform1i(TextureID, 0);
+
     setCamera(cameraX, cameraY, cameraZ, lookatX, lookatY, lookatZ);
     setUniforms();
-
+    glCheckError("Setting the uniforms");
 
     //////////////////////////////////////////////////////////////////////////////
     // Update the points
@@ -771,8 +895,7 @@ void main() {
         for (int w = 0; w < faucets.length && w < faucetCounter; w++){
 
             if((iter+w*4)%(4*fps) == 0){
-              createParticle([uniform(-0.1, 0.1) + faucets[w][0],uniform(-0.1, 0.1) + faucets[w][1],uniform(-0.1, 0.1) + faucets[w][2]], vaoIndex);
-              vaoIndex++;
+              createParticle([uniform(-h/10, h/10) + faucets[w][0],uniform(-h/10, h/10) + faucets[w][1],uniform(-h/10, h/10) + faucets[w][2]], vaoIndex, 0);
             }
         }
 
@@ -781,43 +904,65 @@ void main() {
     TickDuration endUpdate = sw.peek()-startUpdate;
     totalUpdateTime += endUpdate.msecs;
 
-    GLfloat[] offsets;
     TickDuration startRender = sw.peek();
+    int ParticlesCount = cast(int)sphereIndices.length;
+    GLfloat[] g_particule_position_size_data;
+    GLubyte[] g_particule_color_data;
+    ParticleContainer[] particles;
     for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
     {
-        offsets ~= [parPos[sphereIndex][0], parPos[sphereIndex][1], parPos[sphereIndex][2], 1.0];
+        ParticleContainer p;
+        p.position = [parPos[sphereIndex][0],parPos[sphereIndex][1],parPos[sphereIndex][2], 1.4f];
+        p.color = [100,100,255,40];
+        GLfloat[3] distanceVector;
+        GLfloat[3] particlePos = [p.position[0],p.position[1],p.position[2]];
+        GLfloat[3] cameraPos = [cameraX,cameraY,cameraZ];
+        subtract(cameraPos, particlePos, distanceVector);
+        p.cameraDistance = distance(distanceVector);
+        if (parType[sphereIndex] == 1)
+        {
+            p.color = [255,25,25,80];
+            p.position[3] = 1.6f;
+        }
+        else
+        {
+            p.color = [100,100,255,40];
+        }
+        particles ~= [p];
     }
 
-    prepareSphereBuffers(sphereVertexTemplates, sphereNormals, sphereColors, vao[1], vbo, nbo, vertexLoc, vSize,
-                                           stride,  colorLoc, cSize, cPointer, normalLoc);
+    sort!("a.cameraDistance > b.cameraDistance", SwapStrategy.stable)(particles);
 
-    glGenBuffers(1, &obo);
-    glBindBuffer(GL_ARRAY_BUFFER, obo);
-    glBufferData(GL_ARRAY_BUFFER, 4 * GLfloat.sizeof * sphereIndices.length, &offsets[0], GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(offsetLoc);
-    glVertexAttribPointer(
-        offsetLoc,
-        4,
-        GL_FLOAT,
-        GL_FALSE,
-        stride,
-        null
-    );
-    glBindBuffer(GL_ARRAY_BUFFER, vertexLoc);
-    glVertexAttribDivisor(offsetLoc, 1);
+    GLfloat cameraRange = 1;
+    if (ParticlesCount > 1)
+    {
+        cameraRange = particles[0].cameraDistance-particles[ParticlesCount-1].cameraDistance;
+    }
+    GLfloat distanceStep = 1/cameraRange;
+    GLfloat dAlpha = 80;
 
-    glBindVertexArray(vao[1]);
-    glDrawArraysInstanced(GL_TRIANGLES, 0, cast(int)sphereVertexTemplates.length, cast(int)sphereIndices.length);
-    glCheckError();
+    for (int particleIndex = 0; particleIndex < cast(int)particles.length; particleIndex++)
+    {
+        ParticleContainer p = particles[particleIndex];
+        //offsets ~= [parPos[sphereIndex][0], parPos[sphereIndex][1], parPos[sphereIndex][2], 1.0];
+        g_particule_position_size_data ~= p.position;
+        int alpha = cast(int)(dAlpha * distanceStep * p.cameraDistance);
+        if (alpha > 120)
+        {
+            alpha = 120;
+        }
+        p.color[3] = to!ubyte(alpha);
+        g_particule_color_data ~= p.color;
+    }
 
-    //prepareSphereBuffers(sphereVertexTemplates, sphereNormals, sphereColors, vaoSpheres, vbo, nbo, vertexLoc, vSize,
-    //                                     stride,  colorLoc, cSize, cPointer, normalLoc);
-    //glCheckError();
-    //drawSphere(vaoSpheres, sphereVertexTemplates.length);
+    createParticleBuffers(g_vertex_buffer_data, billboard_vertex_buffer, particles_position_buffer, particles_color_buffer, ParticlesCount);
+    glCheckError("Creating buffers");
+    updateParticleBuffers(particles_position_buffer, particles_color_buffer, ParticlesCount,
+                            g_particule_position_size_data, g_particule_color_data);
+    glCheckError("Updating buffers");
 
-    //Draw axis
-    glBindVertexArray(vao[0]);
-    glDrawArrays(GL_LINES, 0, 6);
+    drawParticles(particleVao, billboard_vertex_buffer, particles_position_buffer, particles_color_buffer, squareVerticesLoc, xyzsLoc, colorLoc, ParticlesCount);
+    glCheckError("Drawing the points");
 
     TickDuration endRender = sw.peek()-startRender;
     totalRenderTime = endRender.usecs;
@@ -860,11 +1005,18 @@ void main() {
   glfwTerminate();
 }
 
+extern(C) nothrow void mouse_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+
+}
+
 extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
 
     if ((action != 1 && action != 0) || (key != GLFW_KEY_W && key != GLFW_KEY_A && key != GLFW_KEY_S && key != GLFW_KEY_D
-            && key != GLFW_KEY_F && key != GLFW_KEY_G && key != GLFW_KEY_B))
+            && key != GLFW_KEY_F && key != GLFW_KEY_G && key != GLFW_KEY_B && key != GLFW_KEY_UP && key != GLFW_KEY_RIGHT
+            && key != GLFW_KEY_DOWN && key != GLFW_KEY_LEFT && key != GLFW_KEY_F && key != GLFW_KEY_G && key != GLFW_KEY_B
+            && key != GLFW_KEY_V))
     {
         return;
     }
@@ -895,6 +1047,21 @@ extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, i
                 break;
             case GLFW_KEY_B:
                 bIsDown = action == 1;
+                break;
+            case GLFW_KEY_UP:
+                upIsDown = action == 1;
+                break;
+            case GLFW_KEY_RIGHT:
+                rightIsDown = action == 1;
+                break;
+            case GLFW_KEY_DOWN:
+                downIsDown = action == 1;
+                break;
+            case GLFW_KEY_LEFT:
+                leftIsDown = action == 1;
+                break;
+            case GLFW_KEY_V:
+                vIsDown = action == 1;
                 break;
             default:
                 break;
