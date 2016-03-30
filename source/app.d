@@ -85,7 +85,13 @@ GLfloat cameraX = 4;
 GLfloat cameraY = 1;
 GLfloat cameraZ = 4;
 
-GLfloat walkStepSize = 0.05;
+GLfloat rotateHorizontal = 0;
+GLfloat rotateVertical = 0;
+GLfloat zoom = 0;
+
+const(GLfloat) walkStepSize = 0.05;
+const(GLfloat) orbitStepSize = 0.05;
+const(GLfloat) zoomStepSize = 0.2;
 
 static const GLfloat[] g_vertex_buffer_data = [
  -0.5f, -0.5f, 0.0f,
@@ -101,8 +107,12 @@ bool dIsDown = false;
 
 bool fIsDown = false;
 bool gIsDown = false;
-
 bool bIsDown = false;
+
+bool upIsDown = false;
+bool rightIsDown = false;
+bool downIsDown = false;
+bool leftIsDown = false;
 
 bool checkExecutionTime = false;
 
@@ -229,6 +239,19 @@ void setCamera(GLfloat posX, GLfloat posY, GLfloat posZ, GLfloat lookAtX, GLfloa
   viewMatrix[7]  = 0.0;
   viewMatrix[11] = 0.0;
   viewMatrix[15] = 1.0;
+
+  mat4 viewMat = mat4(
+    vec4(viewMatrix[0], viewMatrix[1], viewMatrix[2], viewMatrix[3]),
+    vec4(viewMatrix[4], viewMatrix[5], viewMatrix[6], viewMatrix[7]),
+    vec4(viewMatrix[8], viewMatrix[9], viewMatrix[10], viewMatrix[11]),
+    vec4(viewMatrix[12], viewMatrix[13], viewMatrix[14], viewMatrix[15])
+  );
+
+    const(float)* pSource = cast(const(float)*)viewMat.value_ptr;
+    for (int i = 0; i < 16; ++i)
+    {
+        viewMatrix[i] = pSource[i];
+    }
 
   setTranslationMatrix(aux, -posX, -posY, -posZ);
 
@@ -699,25 +722,17 @@ void main() {
 
     movementVector = [0,0,0];
 
+    rotateHorizontal = 0;
+    rotateVertical = 0;
+    zoom = 0;
+
     if(wIsDown)
     {
-        GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 0, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);
+        zoom -= zoomStepSize;
     }
     if(sIsDown)
     {
-        GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 1, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);
-    }
-    if(aIsDown)
-    {
-        GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 2, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);
-    }
-    if(dIsDown)
-    {
-        GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 3, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);
+        zoom += zoomStepSize;
     }
     if(fIsDown)
     {
@@ -736,11 +751,51 @@ void main() {
             }
         }
     }
+    if (upIsDown)
+    {
+        rotateVertical += orbitStepSize;
+    }
+    if (rightIsDown)
+    {
+        rotateHorizontal += orbitStepSize;
+    }
+    if (downIsDown)
+    {
+        rotateVertical -= orbitStepSize;
+    }
+    if (leftIsDown)
+    {
+        rotateHorizontal -= orbitStepSize;
+    }
+
+    //printf("rH=%f, rV=%f\n", rotateHorizontal, rotateVertical);
+
+    //Translate to origin
+      cameraX -= lookatX;
+      cameraY -= lookatY;
+      cameraZ -= lookatZ;
+
+      //Rotate camera
+      GLfloat[3] cameraSpherical = cartToSpherical([cameraX,cameraZ,cameraY,1.0]);
+      cameraSpherical[0] += rotateVertical;
+      cameraSpherical[1] += rotateHorizontal;
+      cameraSpherical[2] += zoom;
+      GLfloat[4] cameraCartesian = sphericalToCart(cameraSpherical[0],cameraSpherical[1],cameraSpherical[2]);
+
+      cameraX = cameraCartesian[0];
+      cameraZ = cameraCartesian[1];
+      cameraY = cameraCartesian[2];
+
+      //Translate back
+      cameraX -= lookatX;
+      cameraY += lookatY;
+      cameraZ += lookatZ;
 
     lookatX += movementVector[0];
     lookatZ += movementVector[1];
     cameraX += movementVector[0];
     cameraZ += movementVector[1];
+
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -783,7 +838,7 @@ void main() {
     {
         ParticleContainer p;
         p.position = [parPos[sphereIndex][0],parPos[sphereIndex][1],parPos[sphereIndex][2], 1.5f];
-        p.color = [100,100,255,155];
+        p.color = [100,100,255,100];
         GLfloat[3] distanceVector;
         GLfloat[3] particlePos = [p.position[0],p.position[1],p.position[2]];
         GLfloat[3] cameraPos = [cameraX,cameraY,cameraZ];
@@ -791,8 +846,6 @@ void main() {
         p.cameraDistance = distance(distanceVector);
         particles ~= [p];
     }
-
-    writeln(particles.length);
 
     sort!("a.cameraDistance > b.cameraDistance", SwapStrategy.stable)(particles);
 
@@ -854,11 +907,17 @@ void main() {
   glfwTerminate();
 }
 
+extern(C) nothrow void mouse_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+
+}
+
 extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
 
     if ((action != 1 && action != 0) || (key != GLFW_KEY_W && key != GLFW_KEY_A && key != GLFW_KEY_S && key != GLFW_KEY_D
-            && key != GLFW_KEY_F && key != GLFW_KEY_G && key != GLFW_KEY_B))
+            && key != GLFW_KEY_F && key != GLFW_KEY_G && key != GLFW_KEY_B && key != GLFW_KEY_UP && key != GLFW_KEY_RIGHT
+            && key != GLFW_KEY_DOWN && key != GLFW_KEY_LEFT))
     {
         return;
     }
@@ -889,6 +948,18 @@ extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, i
                 break;
             case GLFW_KEY_B:
                 bIsDown = action == 1;
+                break;
+            case GLFW_KEY_UP:
+                upIsDown = action == 1;
+                break;
+            case GLFW_KEY_RIGHT:
+                rightIsDown = action == 1;
+                break;
+            case GLFW_KEY_DOWN:
+                downIsDown = action == 1;
+                break;
+            case GLFW_KEY_LEFT:
+                leftIsDown = action == 1;
                 break;
             default:
                 break;

@@ -51,7 +51,7 @@ GLuint squareVerticesLoc, xyzsLoc;
 GLfloat g = 0.3; // Gravity force
 GLfloat h = 1.5; // Kernel size
 GLfloat rho = 0.0008; // Rest density
-GLfloat eps = 0.02; // Relaxation parameter
+GLfloat eps = 0.4; // Relaxation parameter
 
 GLfloat binsize = 1.0; // Size of bins for spatial partitioning, should be at least 4*h
 
@@ -62,15 +62,15 @@ GLfloat kScale = 0.1; // Scalar for that stuff
 GLfloat cScale = 0.01; // Scalar for viscocity
 
 int solveIter = 3; // Number of corrective calculation cycles
-int numUpdates = 2; // Number of updates per frame
+int numUpdates = 1; // Number of updates per frame
 
 int fps = 15; //Number of frames per second
 
 ulong sphereVertexCount;
 
 //Bounds
-GLfloat[VECTOR_SIZE] boundsU = [9.5,4.5,9.5];
-GLfloat[VECTOR_SIZE] boundsL = [-9.5,-7.5,-9.5];
+GLfloat[VECTOR_SIZE] boundsU = [7.5,11.5,7.5];
+GLfloat[VECTOR_SIZE] boundsL = [-7.5,-7.5,-7.5];
 GLfloat secondBottom = -9.5;
 
 //Faucets
@@ -85,7 +85,13 @@ GLfloat cameraX = 4;
 GLfloat cameraY = 1;
 GLfloat cameraZ = 4;
 
-GLfloat walkStepSize = 0.05;
+GLfloat rotateHorizontal = 0;
+GLfloat rotateVertical = 0;
+GLfloat zoom = 0;
+
+const(GLfloat) walkStepSize = 0.05;
+const(GLfloat) orbitStepSize = 0.05;
+const(GLfloat) zoomStepSize = 0.2;
 
 static const GLfloat[] g_vertex_buffer_data = [
  -0.5f, -0.5f, 0.0f,
@@ -101,8 +107,12 @@ bool dIsDown = false;
 
 bool fIsDown = false;
 bool gIsDown = false;
-
 bool bIsDown = false;
+
+bool upIsDown = false;
+bool rightIsDown = false;
+bool downIsDown = false;
+bool leftIsDown = false;
 
 bool checkExecutionTime = false;
 
@@ -229,6 +239,19 @@ void setCamera(GLfloat posX, GLfloat posY, GLfloat posZ, GLfloat lookAtX, GLfloa
   viewMatrix[7]  = 0.0;
   viewMatrix[11] = 0.0;
   viewMatrix[15] = 1.0;
+
+  mat4 viewMat = mat4(
+    vec4(viewMatrix[0], viewMatrix[1], viewMatrix[2], viewMatrix[3]),
+    vec4(viewMatrix[4], viewMatrix[5], viewMatrix[6], viewMatrix[7]),
+    vec4(viewMatrix[8], viewMatrix[9], viewMatrix[10], viewMatrix[11]),
+    vec4(viewMatrix[12], viewMatrix[13], viewMatrix[14], viewMatrix[15])
+  );
+
+    const(float)* pSource = cast(const(float)*)viewMat.value_ptr;
+    for (int i = 0; i < 16; ++i)
+    {
+        viewMatrix[i] = pSource[i];
+    }
 
   setTranslationMatrix(aux, -posX, -posY, -posZ);
 
@@ -667,9 +690,9 @@ void main() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Initialize rain
-  for (int v = to!int(ceil(boundsL[0]))+1; v <= to!int(floor(boundsU[0]))-1; v+=2){
-    for (int w = to!int(ceil(boundsL[2]))+1; w <= to!int(floor(boundsU[2]))-1; w +=2){
-        createFaucet([v,4,w]);
+  for (float v = to!int(ceil(boundsL[0]))+1; v <= to!int(floor(boundsU[0]))-1; v+=1.5*h){
+    for (float w = to!int(ceil(boundsL[2]))+1; w <= to!int(floor(boundsU[2]))-1; w +=1.5*h){
+        createFaucet([v,6,w]);
     }
   }
 
@@ -699,15 +722,21 @@ void main() {
 
     movementVector = [0,0,0];
 
+    rotateHorizontal = 0;
+    rotateVertical = 0;
+    zoom = 0;
+
     if(wIsDown)
     {
-        GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 0, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);
+        /*GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 0, walkStepSize);
+        add(movementVector, dMovementVector, movementVector);*/
+        zoom -= zoomStepSize;
     }
     if(sIsDown)
     {
-        GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 1, walkStepSize);
-        add(movementVector, dMovementVector, movementVector);
+        /*GLfloat[VECTOR_SIZE] dMovementVector = getMovementInXZPlane(lookatX, lookatZ, cameraX, cameraZ, 1, walkStepSize);
+        add(movementVector, dMovementVector, movementVector);*/
+        zoom += zoomStepSize;
     }
     if(aIsDown)
     {
@@ -729,13 +758,58 @@ void main() {
     }
     if(bIsDown)
     {
-        //Do some splashing stuff
+        for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+        {
+            if(parPos[sphereIndex][0] < 1.5 && parPos[sphereIndex][0] > -1.5 && parPos[sphereIndex][2] < 1.5 && parPos[sphereIndex][2] > -1.5){
+              parPos[sphereIndex][1] = parPos[sphereIndex][1] + 15;
+            }
+        }
     }
+    if (upIsDown)
+    {
+        rotateVertical += orbitStepSize;
+    }
+    if (rightIsDown)
+    {
+        rotateHorizontal += orbitStepSize;
+    }
+    if (downIsDown)
+    {
+        rotateVertical -= orbitStepSize;
+    }
+    if (leftIsDown)
+    {
+        rotateHorizontal -= orbitStepSize;
+    }
+
+    //printf("rH=%f, rV=%f\n", rotateHorizontal, rotateVertical);
+
+    //Translate to origin
+      cameraX -= lookatX;
+      cameraY -= lookatY;
+      cameraZ -= lookatZ;
+
+      //Rotate camera
+      GLfloat[3] cameraSpherical = cartToSpherical([cameraX,cameraZ,cameraY,1.0]);
+      cameraSpherical[0] += rotateVertical;
+      cameraSpherical[1] += rotateHorizontal;
+      cameraSpherical[2] += zoom;
+      GLfloat[4] cameraCartesian = sphericalToCart(cameraSpherical[0],cameraSpherical[1],cameraSpherical[2]);
+
+      cameraX = cameraCartesian[0];
+      cameraZ = cameraCartesian[1];
+      cameraY = cameraCartesian[2];
+
+      //Translate back
+      cameraX -= lookatX;
+      cameraY += lookatY;
+      cameraZ += lookatZ;
 
     lookatX += movementVector[0];
     lookatZ += movementVector[1];
     cameraX += movementVector[0];
     cameraZ += movementVector[1];
+
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -759,7 +833,7 @@ void main() {
         for (int w = 0; w < faucets.length && w < faucetCounter; w++){
 
             if((iter+w*4)%(4*fps) == 0){
-              createParticle([uniform(-0.1, 0.1) + faucets[w][0],uniform(-0.1, 0.1) + faucets[w][1],uniform(-0.1, 0.1) + faucets[w][2]], vaoIndex);
+              createParticle([uniform(-h/10, h/10) + faucets[w][0],uniform(-h/10, h/10) + faucets[w][1],uniform(-h/10, h/10) + faucets[w][2]], vaoIndex);
               vaoIndex++;
             }
         }
@@ -778,7 +852,7 @@ void main() {
     {
         ParticleContainer p;
         p.position = [parPos[sphereIndex][0],parPos[sphereIndex][1],parPos[sphereIndex][2], 1.5f];
-        p.color = [100,100,255,155];
+        p.color = [100,100,255,100];
         GLfloat[3] distanceVector;
         GLfloat[3] particlePos = [p.position[0],p.position[1],p.position[2]];
         GLfloat[3] cameraPos = [cameraX,cameraY,cameraZ];
@@ -786,8 +860,6 @@ void main() {
         p.cameraDistance = distance(distanceVector);
         particles ~= [p];
     }
-
-    writeln(particles.length);
 
     sort!("a.cameraDistance > b.cameraDistance", SwapStrategy.stable)(particles);
 
@@ -849,11 +921,17 @@ void main() {
   glfwTerminate();
 }
 
+extern(C) nothrow void mouse_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+
+}
+
 extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
 
     if ((action != 1 && action != 0) || (key != GLFW_KEY_W && key != GLFW_KEY_A && key != GLFW_KEY_S && key != GLFW_KEY_D
-            && key != GLFW_KEY_F && key != GLFW_KEY_G && key != GLFW_KEY_B))
+            && key != GLFW_KEY_F && key != GLFW_KEY_G && key != GLFW_KEY_B && key != GLFW_KEY_UP && key != GLFW_KEY_RIGHT
+            && key != GLFW_KEY_DOWN && key != GLFW_KEY_LEFT))
     {
         return;
     }
@@ -884,6 +962,18 @@ extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, i
                 break;
             case GLFW_KEY_B:
                 bIsDown = action == 1;
+                break;
+            case GLFW_KEY_UP:
+                upIsDown = action == 1;
+                break;
+            case GLFW_KEY_RIGHT:
+                rightIsDown = action == 1;
+                break;
+            case GLFW_KEY_DOWN:
+                downIsDown = action == 1;
+                break;
+            case GLFW_KEY_LEFT:
+                leftIsDown = action == 1;
                 break;
             default:
                 break;
