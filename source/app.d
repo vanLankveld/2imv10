@@ -55,7 +55,7 @@ GLfloat g = 0.3; // Gravity force
 GLfloat[VECTOR_SIZE] gVec;
 GLfloat h = 1.5; // Kernel size
 GLfloat rho = 0.0008; // Rest density
-GLfloat eps = 0.4; // Relaxation parameter
+GLfloat eps = 0.2; // Relaxation parameter
 
 GLfloat binsize = 1.0; // Size of bins for spatial partitioning, should be at least 4*h
 
@@ -63,7 +63,7 @@ GLfloat absDQ = 0.2; // Fixed distance scaled in smoothing kernel for tensile in
 GLfloat nPow = 4; // Power for that stuff
 GLfloat kScale = 0.1; // Scalar for that stuff
 
-GLfloat cScale = 0.01; // Scalar for viscocity
+GLfloat cScale = 0.1; // Scalar for viscocity
 
 int solveIter = 3; // Number of corrective calculation cycles
 int numUpdates = 1; // Number of updates per frame
@@ -974,6 +974,10 @@ void main() {
         GLfloat[3] cameraPos = [cameraX,cameraY,cameraZ];
         subtract(cameraPos, particlePos, distanceVector);
         p.cameraDistance = distance(distanceVector);
+        if (isNaN(p.cameraDistance))
+        {
+            p.cameraDistance = 7;
+        }
         if (parType[sphereIndex] == 1)
         {
             p.color = [255,25,25,80];
