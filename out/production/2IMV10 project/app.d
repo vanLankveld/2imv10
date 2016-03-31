@@ -36,7 +36,9 @@ GLuint vaoSpheres;
 GLuint[] sphereIndices; // Particle indices for vao
 GLfloat[VECTOR_SIZE][] parPos; // Current particle positions
 GLfloat[VECTOR_SIZE][] parVel; // Current particle velocities
-GLfloat[] parType; // Particle types, currently 1 for immovable solid, 0 for liquid
+GLfloat[] parType; // Particle types, currently 0 for liquid, 1 for static solid, 2 for infnite mass solid object, 3 for low mass solid object (unavailable), 4 for low mass physics object (unavailable)
+GLfloat[VECTOR_SIZE][3] typePos;
+GLfloat[VECTOR_SIZE][3] typeVel;
 
 GLfloat[][] sphereData;
 GLfloat[] sphereVertexTemplates;
@@ -74,6 +76,8 @@ ulong sphereVertexCount;
 GLfloat[VECTOR_SIZE] boundsU = [7.5,11.5,7.5];
 GLfloat[VECTOR_SIZE] boundsL = [-7.5,-7.5,-7.5];
 GLfloat secondBottom = -9.5;
+
+GLfloat ballRadius = 2.0;
 
 //Faucets
 GLfloat[VECTOR_SIZE][] faucets;
@@ -115,6 +119,7 @@ bool fIsDown = false;
 bool gIsDown = false;
 bool bIsDown = false;
 bool vIsDown = false;
+bool rIsDown = false;
 
 bool upIsDown = false;
 bool rightIsDown = false;
@@ -280,8 +285,13 @@ void setEnvironment(ref uint vaoIndex){
           }
         }
 
+        makeBall([5.0,-5.0,0.0], vaoIndex, 1);
+        makeBall([0.0,-5.0,5.0], vaoIndex, 2);
+}
+
+void makeBall(GLfloat[VECTOR_SIZE] center, ref uint vaoIndex, uint type){
         //Create a large sphere
-        auto vertices = generateVerticesAndNormals([5.0,-6.0,0.0,1.0], 2.0, 9, 15)[0];
+        auto vertices = generateVerticesAndNormals([center[0],center[1],center[2],1.0], ballRadius, 9, 15)[0];
         for (int i = to!int(vertices.length) - 1; i > 2; i -= 4){
             bool wasAdded = false;
             for (int j = to!int(parPos.length) - 1; j >= 0; j--){
@@ -291,8 +301,10 @@ void setEnvironment(ref uint vaoIndex){
                 }
             }
             if(wasAdded) continue;
-            createParticle([vertices[i-3],vertices[i-2],vertices[i-1]],vaoIndex,1);
+            createParticle([vertices[i-3],vertices[i-2],vertices[i-1]],vaoIndex,type);
         }
+        typePos[type] = center;
+        typeVel[type] = [0,0,0];
 }
 
 void gravitySway(int time) {
@@ -303,11 +315,11 @@ void gravitySway(int time) {
     }
 }
 
-void predictPositions(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat dt){
+void predictPositions(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat dt, ref GLfloat[VECTOR_SIZE][3] typeAux){
     for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
         {
             for (int j = 0; j < VECTOR_SIZE; j++){
-                if(parType[sphereIndex] == 0){
+                if(parType[sphereIndex] == 0 || parType[sphereIndex] == 2){
                     parVel[sphereIndex][j] += gVec[j]*dt;
                 } else parVel[sphereIndex][j] = 0;
             }
@@ -315,11 +327,32 @@ void predictPositions(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat dt){
                 parAux[sphereIndex][j] = parPos[sphereIndex][j] + parVel[sphereIndex][j]*dt;
             }
         }
+
+    for (int j = 0; j < VECTOR_SIZE; j++){
+        typeVel[2][j] += gVec[j]*dt;
+        typeAux[2][j] = typePos[2][j] + typeVel[2][j]*dt;
+
+    }
 }
 
-void boundPositions(ref GLfloat[VECTOR_SIZE][] parAux){
-    foreach (sphereIndex; taskPool.parallel(iota(0,to!int(sphereIndices.length)))){
-            //Collision detection with aquarium (faulty)
+void boundPositions(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[VECTOR_SIZE][3] typeAux){
+            GLfloat[VECTOR_SIZE] adjust2;
+            for (int j = 0; j < 3; j++){
+                if(typePos[2][j] > boundsU[j]-ballRadius){
+                    adjust2[j] = (boundsU[j]-ballRadius) - typeAux[2][j];
+                    typeAux[2][j] = boundsU[j]-ballRadius;
+                } else if(typePos[2][j] < boundsL[j]+ballRadius){
+                    adjust2[j] = (boundsL[j]+ballRadius) - typeAux[2][j];
+                    typeAux[2][j] = boundsL[j]+ballRadius;
+                } else adjust2[j] = 0;
+            }
+    for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--){
+            //Collision detection with aquarium
+        if(parType[sphereIndex] == 2){
+            for (int j = 0; j < 3; j++){
+                parAux[sphereIndex][j] += adjust2[j];
+            }
+        } else{
             for (int j = 0; j < 3; j++){
                 if(parAux[sphereIndex][j] > boundsU[j]){
                     parAux[sphereIndex][j] = boundsU[j];
@@ -327,6 +360,7 @@ void boundPositions(ref GLfloat[VECTOR_SIZE][] parAux){
                     parAux[sphereIndex][j] = boundsL[j];
                 }
             }
+        }
     }
 }
 
@@ -341,7 +375,9 @@ void assignBins(ref int[VECTOR_SIZE] binDims, ref int[][][][] bins, ref GLfloat[
         {
             int[VECTOR_SIZE] curbin;
             for(int j = VECTOR_SIZE -1; j >= 0; j--){
+                try{
                 curbin[j] = to!uint((parAux[sphereIndex][j] - boundsL[j])/binsize);
+                } catch (Exception e){ curbin[j] = 0;}
                 if(curbin[j] == binDims[j] ) {
                     curbin[j]--;
                 }
@@ -439,7 +475,12 @@ void applyDP(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat[VECTOR_SIZE][] parDP
         }
 }
 
-void applyPosChanges(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat dt){
+void applyPosChanges(ref GLfloat[VECTOR_SIZE][] parAux, ref GLfloat dt, ref GLfloat[VECTOR_SIZE][3] typeAux){
+    for (int j = 0; j < VECTOR_SIZE; j++){
+        typeVel[2][j] = (typeAux[2][j] - typePos[2][j])/dt;
+    }
+
+    typePos[2] = typeAux[2];
     for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
     {
         for (int j = 0; j < VECTOR_SIZE; j++){
@@ -523,9 +564,10 @@ void applyVelChanges(ref GLfloat[VECTOR_SIZE][] parVelAux){
     for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
     {
         // Apply velocity adjustment
+        if(parType[sphereIndex] == 0){
         for (int j = 0; j < VECTOR_SIZE; j++){
             parVel[sphereIndex][j] = parVelAux[sphereIndex][j];
-        }
+        }}
     }
 }
 
@@ -535,9 +577,11 @@ void updateState(GLfloat dt){
     GLfloat[VECTOR_SIZE][] parDP =  new GLfloat[VECTOR_SIZE][](to!int(sphereIndices.length)); // Current particle delta p
     GLfloat[] parLam =  new GLfloat[](to!int(sphereIndices.length)); // Current particle lambda values
 
-    predictPositions(parAux, dt);
+    GLfloat[VECTOR_SIZE][3] typeAux;
 
-    boundPositions(parAux);
+    predictPositions(parAux, dt, typeAux);
+
+    boundPositions(parAux, typeAux);
 
     for (int i = 0; i < solveIter; i++){
 
@@ -571,10 +615,10 @@ void updateState(GLfloat dt){
         // Apply changes
         applyDP(parAux, parDP);
 
-        boundPositions(parAux);
+        boundPositions(parAux, typeAux);
     }
 
-    applyPosChanges(parAux, dt);
+    applyPosChanges(parAux, dt, typeAux);
 
     int[][] neighbours = new int[][](to!int(sphereIndices.length)); // Current particle neighbours
     int[VECTOR_SIZE] binDims;
@@ -602,7 +646,7 @@ void updateState(GLfloat dt){
 
 // Creates a new particle from position p
 void createParticle(GLfloat[VECTOR_SIZE] p, ref uint vaoIndex, uint type){
-    assert (type < 2);
+    assert (type < 3);
     sphereIndices ~= vaoIndex;
     parPos ~= p;
     parVel ~= [0,0,0];
@@ -809,7 +853,7 @@ void main() {
     {
         for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
         {
-            if(parPos[sphereIndex][0] < 1.5 && parPos[sphereIndex][0] > -1.5 && parPos[sphereIndex][2] < 1.5 && parPos[sphereIndex][2] > -1.5){
+            if(parPos[sphereIndex][0] < 1.5 && parPos[sphereIndex][0] > -1.5 && parPos[sphereIndex][2] < 1.5 && parPos[sphereIndex][2] > -1.5 && parType[sphereIndex] == 0){
               parPos[sphereIndex][1] = parPos[sphereIndex][1] + 15;
             }
         }
@@ -834,6 +878,17 @@ void main() {
     {
         swayCounter++;
         gravitySway(swayCounter);
+    }
+    if(rIsDown)
+    {
+        GLfloat increment = boundsU[1] - typePos[2][1] - ballRadius - 1;
+        typePos[2][1] += increment;
+        for (int sphereIndex = to!int(sphereIndices.length) - 1; sphereIndex >= 0; sphereIndex--)
+        {
+            if(parType[sphereIndex] == 2){
+              parPos[sphereIndex][1] += + increment;
+            }
+        }
     }
 
     //printf("rH=%f, rV=%f\n", rotateHorizontal, rotateVertical);
@@ -909,6 +964,7 @@ void main() {
     GLfloat[] g_particule_position_size_data;
     GLubyte[] g_particule_color_data;
     ParticleContainer[] particles;
+    GLfloat lastDistance = 7;
     for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
     {
         ParticleContainer p;
@@ -919,6 +975,10 @@ void main() {
         GLfloat[3] cameraPos = [cameraX,cameraY,cameraZ];
         subtract(cameraPos, particlePos, distanceVector);
         p.cameraDistance = distance(distanceVector);
+        if (isNaN(p.cameraDistance))
+        {
+            p.cameraDistance = lastDistance;
+        }
         if (parType[sphereIndex] == 1)
         {
             p.color = [255,25,25,80];
@@ -929,6 +989,7 @@ void main() {
             p.color = [100,100,255,40];
         }
         particles ~= [p];
+        lastDistance = p.cameraDistance;
     }
 
     sort!("a.cameraDistance > b.cameraDistance", SwapStrategy.stable)(particles);
@@ -936,7 +997,7 @@ void main() {
     GLfloat cameraRange = 1;
     if (ParticlesCount > 1)
     {
-        cameraRange = particles[0].cameraDistance-particles[ParticlesCount-1].cameraDistance;
+        cameraRange = abs(particles[0].cameraDistance-particles[ParticlesCount-1].cameraDistance);
     }
     GLfloat distanceStep = 1/cameraRange;
     GLfloat dAlpha = 80;
@@ -978,7 +1039,7 @@ void main() {
         float avgRenderTime = cast(float)totalRenderTime/cast(float)frames;
         float avgFrameRate = cast(float)frames/(cast(float)frameEnd.msecs/1000);
 
-        printf("%i,%f,%f,%f\n", vaoIndex, avgUpdateTime, avgRenderTime, avgFrameRate);
+        //printf("%i,%f,%f,%f\n", vaoIndex, avgUpdateTime, avgRenderTime, avgFrameRate);
         frames = 0;
         framesStart = sw.peek();
 
@@ -1016,7 +1077,7 @@ extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, i
     if ((action != 1 && action != 0) || (key != GLFW_KEY_W && key != GLFW_KEY_A && key != GLFW_KEY_S && key != GLFW_KEY_D
             && key != GLFW_KEY_F && key != GLFW_KEY_G && key != GLFW_KEY_B && key != GLFW_KEY_UP && key != GLFW_KEY_RIGHT
             && key != GLFW_KEY_DOWN && key != GLFW_KEY_LEFT && key != GLFW_KEY_F && key != GLFW_KEY_G && key != GLFW_KEY_B
-            && key != GLFW_KEY_V))
+            && key != GLFW_KEY_V && key != GLFW_KEY_R))
     {
         return;
     }
@@ -1062,6 +1123,9 @@ extern(C) nothrow void key_callback(GLFWwindow* window, int key, int scancode, i
                 break;
             case GLFW_KEY_V:
                 vIsDown = action == 1;
+                break;
+            case GLFW_KEY_R:
+                rIsDown = action == 1;
                 break;
             default:
                 break;

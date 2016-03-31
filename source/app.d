@@ -964,6 +964,7 @@ void main() {
     GLfloat[] g_particule_position_size_data;
     GLubyte[] g_particule_color_data;
     ParticleContainer[] particles;
+    GLfloat lastDistance = 7;
     for (int sphereIndex = cast(int)sphereIndices.length - 1; sphereIndex >= 0; sphereIndex--)
     {
         ParticleContainer p;
@@ -974,6 +975,10 @@ void main() {
         GLfloat[3] cameraPos = [cameraX,cameraY,cameraZ];
         subtract(cameraPos, particlePos, distanceVector);
         p.cameraDistance = distance(distanceVector);
+        if (isNaN(p.cameraDistance))
+        {
+            p.cameraDistance = lastDistance;
+        }
         if (parType[sphereIndex] == 1)
         {
             p.color = [255,25,25,80];
@@ -984,6 +989,7 @@ void main() {
             p.color = [100,100,255,40];
         }
         particles ~= [p];
+        lastDistance = p.cameraDistance;
     }
 
     sort!("a.cameraDistance > b.cameraDistance", SwapStrategy.stable)(particles);
@@ -991,7 +997,7 @@ void main() {
     GLfloat cameraRange = 1;
     if (ParticlesCount > 1)
     {
-        cameraRange = particles[0].cameraDistance-particles[ParticlesCount-1].cameraDistance;
+        cameraRange = abs(particles[0].cameraDistance-particles[ParticlesCount-1].cameraDistance);
     }
     GLfloat distanceStep = 1/cameraRange;
     GLfloat dAlpha = 80;
