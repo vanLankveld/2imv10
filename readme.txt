@@ -1,11 +1,10 @@
 ####### Running the simulation ########
-On Linux or Mac, simply run the file "2imv10_project" from your terminal.
+On Linux or Mac, simply run the file "2imv10_project_[OS]” from your terminal.
 We have no confirmed way of running on windows.
 
 ####### Required Installs ########
-The GLFW3 library.
 OpenGL 4.1 or newer.
-DMD compiler to compile the project.
+The GLFW3 library.
 
 ####### Controls #########
 Camera control:
